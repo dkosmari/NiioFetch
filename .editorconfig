@@ -1,0 +1,8 @@
+# EditorConfig: http://EditorConfig.org
+
+# Top-most EditorConfig file
+root = true
+
+# Tab indentation
+[*.{c,h}]
+indent_style = space
