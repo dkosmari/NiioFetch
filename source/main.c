@@ -1,19 +1,23 @@
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <di/di.h>
 #include <gccore.h>
 #include <ogc/machine/processor.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <ogc/system.h>
 #include <wiiuse/wpad.h>
 
 #include "ios.h"
 
 #define AHBPROT_DISABLED (*(vu32*)0xcd800064 == 0xFFFFFFFF)
 
+atomic_bool running;
+
 DI_DriveID DI_id;
 
-static void *xfb = NULL;
-static GXRModeObj *rmode = NULL;
+void *xfb = NULL;
+GXRModeObj *rmode = NULL;
 
 extern int __CONF_GetTxt(const char *name, char *buf, int length);
 
@@ -315,6 +319,11 @@ void printlogo(u8 dev) {
     }
 }
 
+static void power_callback(void)
+{
+    running = false;
+}
+
 //---------------------------------------------------------------------------------
 int main(int argc, char **argv) {
     //---------------------------------------------------------------------------------
@@ -406,7 +415,7 @@ int main(int argc, char **argv) {
 
     // Wait for Video setup to complete
     VIDEO_WaitVSync();
-    if (rmode->viTVMode&VI_NON_INTERLACE) VIDEO_WaitVSync();
+    if (rmode->viTVMode & VI_NON_INTERLACE) VIDEO_WaitVSync();
 
     printf("\x1b[3;31H");
 
@@ -486,13 +495,22 @@ int main(int argc, char **argv) {
         writetoxfb(xfb, 160 + 84 + i*320, 12,  COLOR_WHITE);
     }
 
-    while (1) {
+    atomic_store(&running, true);
+    SYS_SetPowerCallback(power_callback);
+    while (atomic_load(&running)) {
         printf("\x1b[19;48H P1 Battery Level : %d%%    ", WPAD_BatteryLevel(0));
+
+        if (SYS_ResetButtonDown()) {
+            printf("\nRESET pressed, exiting...\n");
+            atomic_store(&running, false);
+        }
+
         WPAD_ScanPads();
         u32 pressed = WPAD_ButtonsDown(0);
 
         if (pressed & WPAD_BUTTON_HOME) {
-            return 0;
+            printf("\nHOME pressed, exiting...\n");
+            atomic_store(&running, false);
         }
 
         VIDEO_WaitVSync();
