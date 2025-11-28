@@ -14,10 +14,11 @@
 
 #include "ios.h"
 
-#include "dolphin-logo_png.h"
-#include "wii-logo_png.h"
-#include "wii-mini-logo_png.h"
-#include "wiiu-logo_png.h"
+#include "dolphin-image_png.h"
+#include "wii-image_png.h"
+#include "wii-family-image_png.h"
+#include "wii-mini-image_png.h"
+#include "wiiu-image_png.h"
 
 #define AHBPROT_DISABLED (*(vu32*)0xcd800064 == 0xFFFFFFFF)
 
@@ -51,11 +52,12 @@ const char *regions[] = {
     "China"
 };
 
-enum consoletypes {
-    WII,
-    vWII,
-    mWII,
-    dolphin
+enum ConsoleType {
+    TypeWii,
+    TypeWiiFamily,
+    TypeWiiMini,
+    TypeWiiU,
+    TypeDolphin
 };
 
 u16 get_tmd_version(u64 title) { // From the homebrew channel
@@ -309,7 +311,7 @@ void convert_row(const u8* src_rgb, unsigned src_width, u32* dst_yuv422)
 
 void blit_png(const u8* data, size_t size)
 {
-    const unsigned screen_x = 10;
+    const unsigned screen_x = 8;
     const unsigned screen_y = 80;
 
     int r;
@@ -342,22 +344,26 @@ void blit_png(const u8* data, size_t size)
     png_image_free(&img);
 }
 
-void printlogo(u8 dev) {
-    switch (dev) {
-        case WII:
-            blit_png(wii_logo_png, wii_logo_png_size);
+void show_image(enum ConsoleType t) {
+    switch (t) {
+        case TypeWii:
+            blit_png(wii_image_png, wii_image_png_size);
             break;
 
-        case mWII:
-            blit_png(wii_mini_logo_png, wii_mini_logo_png_size);
+        case TypeWiiFamily:
+            blit_png(wii_family_image_png, wii_family_image_png_size);
             break;
 
-        case vWII:
-            blit_png(wiiu_logo_png, wiiu_logo_png_size);
+        case TypeWiiMini:
+            blit_png(wii_mini_image_png, wii_mini_image_png_size);
             break;
 
-        case dolphin:
-            blit_png(dolphin_logo_png, dolphin_logo_png_size);
+        case TypeWiiU:
+            blit_png(wiiu_image_png, wiiu_image_png_size);
+            break;
+
+        case TypeDolphin:
+            blit_png(dolphin_image_png, dolphin_image_png_size);
             break;
 
         default:
@@ -401,26 +407,23 @@ int main(void) {
     bool ahbprot = disable_ahbprot();
 
     if (!AHBPROT_DISABLED)
-        return 0;
+        return -1;
 
     CONF_Init();
 
     u16 SMVER = get_tmd_version(0x0000000100000002);
 
-    u8 consoletype = WII;
+    enum ConsoleType console_type = TypeWii;
 
     s32 test = IOS_Open("/dev/dolphin", 0);
-
-    if (test >= 0) {
-        consoletype = dolphin;
-    }
-
+    if (test >= 0)
+        console_type = TypeDolphin;
     IOS_Close(test);
 
     u8 nickname[11];
-    char drivedate[15];
-    char sernumber[11];
-    char sernumberprefix[4];
+    char drivedate[15] = {0};
+    char serial_number[11];
+    char serial_prefix[4];
     char model[14];
     u32 boot2ver = 0;
     u32 numoftitles = 0;
@@ -430,7 +433,7 @@ int main(void) {
             uint32_t y = (DI_id.rel_date >> 16) & 0xffff;
             uint32_t m = (DI_id.rel_date >>  8) & 0x00ff;
             uint32_t d = (DI_id.rel_date >>  0) & 0x00ff;
-            snprintf(drivedate, sizeof drivedate, "%04X/%02X/%02X", y, m, d);
+            snprintf(drivedate, sizeof drivedate, "%04X-%02X-%02X", y, m, d);
         }
         DI_Close();
     }
@@ -438,14 +441,18 @@ int main(void) {
     ES_GetNumTitles(&numoftitles);
     ES_GetBoot2Version(&boot2ver);
 
-    if (boot2ver == 0) {
-        consoletype = vWII;
-    }
+    if (boot2ver == 0)
+        console_type = TypeWiiU;
 
     CONF_GetNickName(nickname);
-    __CONF_GetTxt("CODE", sernumberprefix, 4);
-    __CONF_GetTxt("SERNO", sernumber, 10);
-    __CONF_GetTxt("MODEL", model, 13);
+    __CONF_GetTxt("CODE", serial_prefix, sizeof serial_prefix);
+    __CONF_GetTxt("SERNO", serial_number, sizeof serial_number);
+    __CONF_GetTxt("MODEL", model, sizeof model);
+
+    if (!strcmp(model, "RVL-101"))
+        console_type = TypeWiiFamily;
+    if (!strcmp(model, "RVL-201"))
+        console_type = TypeWiiMini;
 
     // Obtain the preferred video mode from the system
     // This will correspond to the settings in the Wii menu
@@ -479,35 +486,34 @@ int main(void) {
 
     // Wait for Video setup to complete
     VIDEO_WaitVSync();
-    if (rmode->viTVMode & VI_NON_INTERLACE) VIDEO_WaitVSync();
+    if (rmode->viTVMode & VI_NON_INTERLACE)
+        VIDEO_WaitVSync();
 
     printf_xy(31, 3, "NiioFetch %s", VER);
 
-    printlogo(consoletype);
+    show_image(console_type);
 
     const int cur_x = 48;
 
     printf_xy(cur_x, 5, "Running on IOS : %d", IOS_GetVersion());
-    switch (consoletype) {
-        case WII:
-        case mWII:
+    switch (console_type) {
+        case TypeWii:
+        case TypeWiiFamily:
+        case TypeWiiMini:
             printf_xy(cur_x, 6, "CPU : IBM PowerPC 750CL");
             break;
 
-        case vWII:
+        case TypeWiiU:
             printf_xy(cur_x, 6, "CPU : IBM \"Espresso\"");
             break;
 
-        case dolphin:
+        case TypeDolphin:
             printf_xy(cur_x, 6, "CPU : Emulated CPU");
-            break;
-
-        default:
             break;
     }
     s32 __net_hid = iosCreateHeap(1024);
     u8 *buff = iosAlloc(__net_hid, 6);
-
+    memset(buff, 0, 6);
     s32 fd = IOS_Open("/dev/net/wd/command", 3);
     IOS_IoctlvFormat(__net_hid, fd, 0x100e, ":d", buff, 6);
     printf_xy(cur_x, 7, "WiFi MAC : %02X-%02X-%02X-%02X-%02X-%02X",
@@ -523,7 +529,7 @@ int main(void) {
 
     printf_xy(cur_x, 13, "Nickname : %s", nickname);
     printf_xy(cur_x, 14, "Wii Model : %s", model);
-    printf_xy(cur_x, 15, "Serial : %s%s", sernumberprefix, sernumber);
+    printf_xy(cur_x, 15, "Serial : %s%s", serial_prefix, serial_number);
 
     printf_xy(cur_x, 16, "Region : %s", regions[CONF_GetRegion()]);
     printf_xy(cur_x, 17, "Language : %s", languages[CONF_GetLanguage()]);
