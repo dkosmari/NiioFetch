@@ -449,9 +449,9 @@ int main(void) {
     __CONF_GetTxt("SERNO", serial_number, sizeof serial_number);
     __CONF_GetTxt("MODEL", model, sizeof model);
 
-    if (!strcmp(model, "RVL-101"))
+    if (!strncmp(model, "RVL-101", 7))
         console_type = TypeWiiFamily;
-    if (!strcmp(model, "RVL-201"))
+    if (!strncmp(model, "RVL-201", 7))
         console_type = TypeWiiMini;
 
     // Obtain the preferred video mode from the system
