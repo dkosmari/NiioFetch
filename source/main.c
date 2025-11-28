@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 #include <di/di.h>
 #include <gccore.h>
@@ -15,11 +16,10 @@
 
 #include "dolphin-logo_png.h"
 #include "wii-logo_png.h"
+#include "wii-mini-logo_png.h"
 #include "wiiu-logo_png.h"
 
 #define AHBPROT_DISABLED (*(vu32*)0xcd800064 == 0xFFFFFFFF)
-
-atomic_bool running;
 
 DI_DriveID DI_id;
 
@@ -345,8 +345,11 @@ void blit_png(const u8* data, size_t size)
 void printlogo(u8 dev) {
     switch (dev) {
         case WII:
-        case mWII:
             blit_png(wii_logo_png, wii_logo_png_size);
+            break;
+
+        case mWII:
+            blit_png(wii_mini_logo_png, wii_mini_logo_png_size);
             break;
 
         case vWII:
@@ -362,9 +365,27 @@ void printlogo(u8 dev) {
     }
 }
 
+atomic_bool power_pressed;
+
 static void power_callback(void)
 {
-    running = false;
+    atomic_store(&power_pressed, true);
+}
+
+__attribute__(( __format__(__printf__, 3, 4) ))
+int printf_xy(int x, int y, const char* fmt, ...)
+{
+    int r1, r2;
+    r1 = printf("\x1b[%d;%dH", y, x);
+    if (r1 < 0)
+        return r1;
+    va_list args;
+    va_start(args, fmt);
+    r2 = vprintf(fmt, args);
+    va_end(args);
+    if (r2 < 0)
+        return r2;
+    return r1 + r2;
 }
 
 //---------------------------------------------------------------------------------
@@ -460,25 +481,24 @@ int main(void) {
     VIDEO_WaitVSync();
     if (rmode->viTVMode & VI_NON_INTERLACE) VIDEO_WaitVSync();
 
-    printf("\x1b[3;31H");
+    printf_xy(31, 3, "NiioFetch %s", VER);
 
-    printf("NiioFetch %s", VER);
-
-    printf("\x1b[7;0H");
     printlogo(consoletype);
 
-    printf("\x1b[5;48H Running on IOS : %d", IOS_GetVersion());
+    const int cur_x = 48;
+
+    printf_xy(cur_x, 5, "Running on IOS : %d", IOS_GetVersion());
     switch (consoletype) {
         case WII:
-            printf("\x1b[6;48H CPU : IBM PowerPC 750CL");
+            printf_xy(cur_x, 6, "CPU : IBM PowerPC 750CL");
             break;
 
         case vWII:
-            printf("\x1b[6;48H CPU : IBM \"Espresso\"");
+            printf_xy(cur_x, 6, "CPU : IBM \"Espresso\"");
             break;
 
         case dolphin:
-            printf("\x1b[6;48H CPU : Emulated CPU");
+            printf_xy(cur_x, 6, "CPU : Emulated CPU");
             break;
 
         default:
@@ -489,33 +509,29 @@ int main(void) {
 
     s32 fd = IOS_Open("/dev/net/wd/command", 3);
     IOS_IoctlvFormat(__net_hid, fd, 0x100e, ":d", buff, 6);
-    printf("\x1b[7;48H WiFi MAC : ");
-    for (int i = 0; i < 6; i++) {
-        printf("%02X", buff[i]);
-        if (i < 5) {
-            putchar('-');
-        }
-    }
+    printf_xy(cur_x, 7, "WiFi MAC : %02X-%02X-%02X-%02X-%02X-%02X",
+              buff[0], buff[1], buff[2], buff[3], buff[4], buff[5]);
     IOS_Close(fd);
     iosFree(__net_hid, buff);
 
-    printf("\x1b[8;48H System Menu : %.1f%c", GetSysMenuNintendoVersion(SMVER), GetSysMenuRegion(SMVER));
-    printf("\x1b[9;48H Boot2 : v%d", boot2ver);
-    printf("\x1b[10;48H Drive Date : %s", drivedate);
-    printf("\x1b[11;48H Hollywood Revision : 0x%X", SYS_GetHollywoodRevision());
-    printf("\x1b[12;48H Resolution : %d%c", rmode->viHeight, VIDEO_GetVideoScanMode() ? 'p' : 'i');
+    printf_xy(cur_x, 8, "System Menu : %.1f%c", GetSysMenuNintendoVersion(SMVER), GetSysMenuRegion(SMVER));
+    printf_xy(cur_x, 9, "Boot2 : v%d", boot2ver);
+    printf_xy(cur_x, 10, "Drive Date : %s", drivedate);
+    printf_xy(cur_x, 11, "Hollywood Revision : 0x%X", SYS_GetHollywoodRevision());
+    printf_xy(cur_x, 12, "Resolution : %d%c", rmode->viHeight, VIDEO_GetVideoScanMode() ? 'p' : 'i');
 
-    printf("\x1b[13;48H Nickname : %s", nickname);
-    printf("\x1b[14;48H Wii Model : %s", model);
-    printf("\x1b[15;48H S/N : %s%s", sernumberprefix, sernumber);
+    printf_xy(cur_x, 13, "Nickname : %s", nickname);
+    printf_xy(cur_x, 14, "Wii Model : %s", model);
+    printf_xy(cur_x, 15, "Serial : %s%s", sernumberprefix, sernumber);
 
-    printf("\x1b[16;48H Region : %s", regions[CONF_GetRegion()]);
-    printf("\x1b[17;48H Language : %s", languages[CONF_GetLanguage()]);
+    printf_xy(cur_x, 16, "Region : %s", regions[CONF_GetRegion()]);
+    printf_xy(cur_x, 17, "Language : %s", languages[CONF_GetLanguage()]);
 
-    printf("\x1b[18;48H Titles installed  : %d", numoftitles);
+    printf_xy(cur_x, 18, "Titles installed  : %d", numoftitles);
 
-    printf("\x1b[19;48H P1 Battery Level : %d%%", WPAD_BatteryLevel(0));
+    printf_xy(cur_x, 19, "P1 Battery Level : %d%%", WPAD_BatteryLevel(0));
 
+    fflush(stdout);
 
     for (int i = 400; i < 416; i++) {
         writetoxfb(xfb, 160 + i*320, 12, COLOR_BLACK);
@@ -538,22 +554,32 @@ int main(void) {
         writetoxfb(xfb, 160 + 84 + i*320, 12,  COLOR_WHITE);
     }
 
-    atomic_store(&running, true);
     SYS_SetPowerCallback(power_callback);
-    while (atomic_load(&running)) {
-        printf("\x1b[19;48H P1 Battery Level : %d%%    ", WPAD_BatteryLevel(0));
+
+    bool running = true;
+    while (running) {
+        printf_xy(cur_x, 19, "P1 Battery Level : %d%%    ", WPAD_BatteryLevel(0));
+        fflush(stdout);
 
         if (SYS_ResetButtonDown()) {
-            printf("\nRESET pressed, exiting...\n");
-            atomic_store(&running, false);
+            printf_xy(24, 22, "RESET pressed, exiting...");
+            fflush(stdout);
+            running = false;
+        }
+
+        if (atomic_load(&power_pressed)) {
+            printf_xy(24, 22, "POWER pressed, exiting...");
+            fflush(stdout);
+            running = false;
         }
 
         WPAD_ScanPads();
         u32 pressed = WPAD_ButtonsDown(0);
 
         if (pressed & WPAD_BUTTON_HOME) {
-            printf("\nHOME pressed, exiting...\n");
-            atomic_store(&running, false);
+            printf_xy(24, 22, "HOME pressed, exiting...");
+            fflush(stdout);
+            running = false;
         }
 
         VIDEO_WaitVSync();
