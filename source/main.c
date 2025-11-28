@@ -490,6 +490,7 @@ int main(void) {
     printf_xy(cur_x, 5, "Running on IOS : %d", IOS_GetVersion());
     switch (consoletype) {
         case WII:
+        case mWII:
             printf_xy(cur_x, 6, "CPU : IBM PowerPC 750CL");
             break;
 
