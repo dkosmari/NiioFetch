@@ -313,21 +313,18 @@ void blit_png(const u8* data, size_t size)
 {
     const unsigned screen_x = 8;
     const unsigned screen_y = 80;
-
-    int r;
-    u8* pixels = NULL;
-    png_image img;
     unsigned max_width = rmode->fbWidth - screen_x;
     unsigned max_height = rmode->xfbHeight - screen_y;
+
+    png_image img;
     memset(&img, 0, sizeof img);
     img.version = PNG_IMAGE_VERSION;
-    r = png_image_begin_read_from_memory(&img, data, size);
-    if (!r) {
+    if (!png_image_begin_read_from_memory(&img, data, size)) {
         png_image_free(&img);
         return;
     }
     img.format = PNG_FORMAT_RGB;
-    pixels = calloc(img.width * img.height, 3);
+    u8* pixels = calloc(img.width * img.height, 3);
     png_image_finish_read(&img, NULL, pixels, 3 * img.width, NULL);
 
     if (img.height < max_height)
@@ -421,7 +418,7 @@ int main(void) {
     IOS_Close(test);
 
     u8 nickname[11];
-    char drivedate[15] = {0};
+    char drive_date[15] = "";
     char serial_number[11];
     char serial_prefix[4];
     char model[14];
@@ -433,7 +430,7 @@ int main(void) {
             uint32_t y = (DI_id.rel_date >> 16) & 0xffff;
             uint32_t m = (DI_id.rel_date >>  8) & 0x00ff;
             uint32_t d = (DI_id.rel_date >>  0) & 0x00ff;
-            snprintf(drivedate, sizeof drivedate, "%04X-%02X-%02X", y, m, d);
+            snprintf(drive_date, sizeof drive_date, "%04X-%02X-%02X", y, m, d);
         }
         DI_Close();
     }
@@ -511,19 +508,19 @@ int main(void) {
             printf_xy(cur_x, 6, "CPU : Emulated CPU");
             break;
     }
-    s32 __net_hid = iosCreateHeap(1024);
-    u8 *buff = iosAlloc(__net_hid, 6);
-    memset(buff, 0, 6);
+    s32 net_heap = iosCreateHeap(1024);
+    u8* mac = iosAlloc(net_heap, 6);
+    memset(mac, 0, 6);
     s32 fd = IOS_Open("/dev/net/wd/command", 3);
-    IOS_IoctlvFormat(__net_hid, fd, 0x100e, ":d", buff, 6);
+    IOS_IoctlvFormat(net_heap, fd, 0x100e, ":d", mac, 6);
     printf_xy(cur_x, 7, "WiFi MAC : %02X-%02X-%02X-%02X-%02X-%02X",
-              buff[0], buff[1], buff[2], buff[3], buff[4], buff[5]);
+              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     IOS_Close(fd);
-    iosFree(__net_hid, buff);
+    iosFree(net_heap, mac);
 
     printf_xy(cur_x, 8, "System Menu : %.1f%c", GetSysMenuNintendoVersion(SMVER), GetSysMenuRegion(SMVER));
     printf_xy(cur_x, 9, "Boot2 : v%d", boot2ver);
-    printf_xy(cur_x, 10, "Drive Date : %s", drivedate);
+    printf_xy(cur_x, 10, "Drive Date : %s", drive_date);
     printf_xy(cur_x, 11, "Hollywood Revision : 0x%X", SYS_GetHollywoodRevision());
     printf_xy(cur_x, 12, "Resolution : %d%c", rmode->viHeight, VIDEO_GetVideoScanMode() ? 'p' : 'i');
 
@@ -534,9 +531,9 @@ int main(void) {
     printf_xy(cur_x, 16, "Region : %s", regions[CONF_GetRegion()]);
     printf_xy(cur_x, 17, "Language : %s", languages[CONF_GetLanguage()]);
 
-    printf_xy(cur_x, 18, "Titles installed  : %d", numoftitles);
+    printf_xy(cur_x, 18, "Titles installed : %d", numoftitles);
 
-    printf_xy(cur_x, 19, "P1 Battery Level : %d%%", WPAD_BatteryLevel(0));
+    printf_xy(cur_x, 19, "P1 Battery : %d", WPAD_BatteryLevel(0));
 
     fflush(stdout);
 
@@ -565,7 +562,7 @@ int main(void) {
 
     bool running = true;
     while (running) {
-        printf_xy(cur_x, 19, "P1 Battery Level : %d%%    ", WPAD_BatteryLevel(0));
+        printf_xy(cur_x, 19, "P1 Battery : %d    ", WPAD_BatteryLevel(0));
         fflush(stdout);
 
         if (SYS_ResetButtonDown()) {
