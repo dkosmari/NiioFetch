@@ -63,3 +63,5 @@ Makefile
 Makefile
 
 *~
+compile_flags.txt
+build/

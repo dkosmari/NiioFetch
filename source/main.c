@@ -1,6 +1,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <di/di.h>
 #include <gccore.h>
@@ -8,7 +9,13 @@
 #include <ogc/system.h>
 #include <wiiuse/wpad.h>
 
+#include <png.h>
+
 #include "ios.h"
+
+#include "dolphin-logo_png.h"
+#include "wii-logo_png.h"
+#include "wiiu-logo_png.h"
 
 #define AHBPROT_DISABLED (*(vu32*)0xcd800064 == 0xFFFFFFFF)
 
@@ -22,7 +29,6 @@ GXRModeObj *rmode = NULL;
 extern int __CONF_GetTxt(const char *name, char *buf, int length);
 
 #define VER "1.3"
-
 
 const char *languages[] = {
     "Japanese",
@@ -237,7 +243,7 @@ char GetSysMenuRegion(u32 sysVersion) { // From SysCheck
     return 'X';
 }
 
-const u32 RGB2YCBCR(u8 r1, u8 g1, u8 b1) {
+u32 RGB2YCBCR(u8 r1, u8 g1, u8 b1) {
     u8 r2 = r1; u8 g2 = g1; u8 b2 = b1;
     if (r1 < 16) r1 = 16;
     if (g1 < 16) g1 = 16;
@@ -263,55 +269,92 @@ const u32 RGB2YCBCR(u8 r1, u8 g1, u8 b1) {
 
 void writetoxfb(void* videoBuffer, u32 offset, u32 length, u32 color)
 {
-    u32 *p = ((u32*)videoBuffer) + offset;
-    for(u32 i = 0; i < length; i++) {
-        *p++ = color;
+    u32 *pixels = ((u32*)videoBuffer) + offset;
+    for (u32 i = 0; i < length; i++) {
+        *pixels++ = color;
     }
+}
+
+u32 clamp_u32(u32 x, u32 low, u32 high)
+{
+    if (x < low)
+        return low;
+    if (x > high)
+        return high;
+    return x;
+}
+
+void convert_row(const u8* src_rgb, unsigned src_width, u32* dst_yuv422)
+{
+    for (unsigned x = 0; x < src_width; x += 2) {
+        u32 r1 = clamp_u32(src_rgb[3*x + 0], 16, 240);
+        u32 g1 = clamp_u32(src_rgb[3*x + 1], 16, 240);
+        u32 b1 = clamp_u32(src_rgb[3*x + 2], 16, 240);
+
+        u32 r2 = 16, g2 = 16, b2 = 16;
+        if (x + 1 < src_width) {
+            r2 = clamp_u32(src_rgb[3*x + 3], 16, 240);
+            g2 = clamp_u32(src_rgb[3*x + 4], 16, 240);
+            b2 = clamp_u32(src_rgb[3*x + 5], 16, 240);
+        }
+
+        u32 Y1 = (( 77u * r1 + 150u * g1 + 29u * b1) / 256u) & 0xffu;
+        u32 Y2 = (( 77u * r2 + 150u * g2 + 29u * b2) / 256u) & 0xffu;
+        u32 Cb = ((112u * (b1 + b2) - 74u * (g1 + g2) - 38u * (r1 + r2)) / 512u + 128u) & 0xffu;
+        u32 Cr = ((112u * (r1 + r2) - 94u * (g1 + g2) - 18u * (b1 + b2)) / 512u + 128u) & 0xffu;
+
+        dst_yuv422[x/2] = (Y1 << 24u) | (Cb << 16u) | (Y2 << 8u) | Cr;
+    }
+}
+
+void blit_png(const u8* data, size_t size)
+{
+    const unsigned screen_x = 10;
+    const unsigned screen_y = 80;
+
+    int r;
+    u8* pixels = NULL;
+    png_image img;
+    unsigned max_width = rmode->fbWidth - screen_x;
+    unsigned max_height = rmode->xfbHeight - screen_y;
+    memset(&img, 0, sizeof img);
+    img.version = PNG_IMAGE_VERSION;
+    r = png_image_begin_read_from_memory(&img, data, size);
+    if (!r) {
+        png_image_free(&img);
+        return;
+    }
+    img.format = PNG_FORMAT_RGB;
+    pixels = calloc(img.width * img.height, 3);
+    png_image_finish_read(&img, NULL, pixels, 3 * img.width, NULL);
+
+    if (img.height < max_height)
+        max_height = img.height;
+    if (img.width < max_width)
+        max_width = img.width;
+    for (unsigned y = 0; y < max_height; ++y) {
+        const u8* src_row = pixels + 3 * (y * img.width);
+        u32* dst_row = ((u32*)xfb) + ((y + screen_y) * rmode->fbWidth + screen_x) / 2;
+        convert_row(src_row, max_width, dst_row);
+    }
+
+    free(pixels);
+    png_image_free(&img);
 }
 
 void printlogo(u8 dev) {
     switch (dev) {
         case WII:
         case mWII:
-            printf("    &&&        &        &&&  &&&&   &&&&\n");
-            printf("    &&&&      &&&      &&&&  &&&&   &&&&\n");
-            printf("     &&&     &&&&&    &&&&\n");
-            printf("     &&&&   &&& &&&   &&&&   &&&&   &&&&\n");
-            printf("      &&&   &&& &&&  &&&&    &&&&   &&&&\n");
-            printf("      &&&& &&&   &&& &&&&    &&&&   &&&&\n");
-            printf("       &&&&&&&   &&&&&&&     &&&&   &&&&\n");
-            printf("       &&&&&&     &&&&&      &&&&   &&&&\n");
-            printf("        &&&&       &&&&      &&&&   &&&& &&\n");
+            blit_png(wii_logo_png, wii_logo_png_size);
             break;
 
         case vWII:
-            printf("&&&        &        &&& &&&  &&& \x1b[96;40m&&+&  &x&  &x&.\x1b[37;40m\n");
-            printf("&&&&      &&&      &&&& &&&  &&& \x1b[96;40m&&x&  &&& .&x&.\x1b[37;40m\n");
-            printf(" &&&     &&&&&     &&&           \x1b[96;40m&&x&  &&& .&x&.\x1b[37;40m\n");
-            printf(" &&&&   &&& &&&   &&&   &&&  &&& \x1b[96;40m&x&&&    .&&$&\x1b[37;40m\n");
-            printf("  &&&   &&& &&&  &&&&   &&&  &&&  \x1b[96;40m&&&&&&&&&&&&\x1b[37;40m\n");
-            printf("  &&&& &&&   &&& &&&&   &&&  &&&\n");
-            printf("   &&&&&&&   &&&&&&&    &&&  &&&\n");
-            printf("   &&&&&&     &&&&&     &&&  &&&\n");
-            printf("    &&&&       &&&&     &&&  &&&\n");
+            blit_png(wiiu_logo_png, wiiu_logo_png_size);
             break;
 
         case dolphin:
-            printf("\x1b[96;40m                  .x.           &&&&&\n");
-            printf("         &&&&&&&&&&&&&&&&&&&&&&&; .X&&&$\n");
-            printf("      &&X     ..::::+;:        .:..\n");
-            printf("    &&: .:;;+$&&&&&&&&&&&&&&&$x++;&&&\n");
-            printf("   &+..;;;+::.               &&&&$  +&&\n");
-            printf("   &;;+;+;+;$&&&&&&&&&&&&        &&&X .&&\n");
-            printf("  &X;+;;xX$&&&&x:::.    :&&&;       &&& .&&\n");
-            printf("&&&&&&&&&&&X   &&xx++&&&&&::&&&       &&&;&&\n");
-            printf(" X&&            &&&;+&    &&&&&&        &&$X&\n");
-            printf("                  &&&&&       &&&&        &&&&\n");
-            printf("                     x&&&        &&         &&&\n");
-            printf("                                             &&&\n");
-            printf("                                              &&\n");
-            printf("                                               &&\n");
-            printf("                                                &\x1b[37;40m\n");
+            blit_png(dolphin_logo_png, dolphin_logo_png_size);
             break;
 
         default:
@@ -325,7 +368,7 @@ static void power_callback(void)
 }
 
 //---------------------------------------------------------------------------------
-int main(int argc, char **argv) {
+int main(void) {
     //---------------------------------------------------------------------------------
 
     // Initialise the video system

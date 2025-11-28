@@ -27,7 +27,7 @@ INCLUDES	:=
 # options for code generation
 #---------------------------------------------------------------------------------
 
-CFLAGS	= -g -O2 -Wall $(MACHDEP) $(INCLUDE)
+CFLAGS	= -g -O2 -Wall -Wextra -Werror $(MACHDEP) $(INCLUDE)
 CXXFLAGS	=	$(CFLAGS)
 
 LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
@@ -36,6 +36,14 @@ LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
 LIBS	:=	-lwiiuse -lbte -logc -lm -ldi
+
+PKG_CONFIG := $(PREFIX)pkg-config
+
+LIBPNG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libpng)
+LIBPNG_LIBS := $(shell $(PKG_CONFIG) --libs libpng)
+
+CPPFLAGS := $(LIBPNG_CFLAGS)
+LIBS += $(LIBPNG_LIBS)
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
@@ -127,13 +135,25 @@ $(OFILES_SOURCES) : $(HFILES)
 #---------------------------------------------------------------------------------
 # This rule links in binary data with the .jpg extension
 #---------------------------------------------------------------------------------
-%.jpg.o	%_jpg.h :	%.jpg
+%.jpg.o	%_jpg.h: %.jpg
 #---------------------------------------------------------------------------------
 	@echo $(notdir $<)
 	$(bin2o)
+
+%.png.o %_png.h: %.png
+	$(bin2o)
+
 
 -include $(DEPENDS)
 
 #---------------------------------------------------------------------------------
 endif
 #---------------------------------------------------------------------------------
+
+
+.PHONY: company
+company: compile_flags.txt
+
+compile_flags.txt: Makefile
+	printf "%s" "$(CPPFLAGS) $(INCLUDE) -DGECKO -D__WII__" | xargs -n1 | sort -u > compile_flags.txt
+	$(CPP) -xc /dev/null -E -Wp,-v -mrvl 2>&1 | sed -n 's,^ ,-I,p' >> compile_flags.txt
