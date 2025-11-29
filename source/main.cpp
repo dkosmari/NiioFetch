@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdlib>
@@ -63,7 +64,7 @@ enum class ConsoleType {
     WiiFamily,
     WiiMini,
     WiiU,
-    Dolphin
+    Dolphin,
 };
 
 std::unordered_map<std::string, std::string> settings;
@@ -102,7 +103,8 @@ getline(std::string_view& input,
     return true;
 }
 
-void load_settings()
+void
+load_settings()
 {
     std::array<char, 0x100> settings_buf alignas(32);
     int fd = IOS_Open("/title/00000001/00000002/data/setting.txt", IPC_OPEN_READ);
@@ -154,7 +156,8 @@ u16 get_tmd_version(u64 title) { // From the homebrew channel
     return (tmdbuf[88] << 8) | tmdbuf[89];
 }
 
-float GetSysMenuNintendoVersion(u32 sysVersion)
+float
+GetSysMenuNintendoVersion(u32 sysVersion)
 {
     // From SysCheck
     switch (sysVersion) {
@@ -242,7 +245,10 @@ float GetSysMenuNintendoVersion(u32 sysVersion)
 
 }
 
-char GetSysMenuRegion(u32 sysVersion) { // From SysCheck
+char
+GetSysMenuRegion(u32 sysVersion)
+{
+    // From SysCheck
     switch (sysVersion) {
         case 1:  //Pre-launch
         case 97: //2.0U
@@ -260,7 +266,6 @@ char GetSysMenuRegion(u32 sysVersion) { // From SysCheck
         case 545:
         case 609:
             return 'U';
-            break;
 
         case 130: //2.0E
         case 162: //2.1E
@@ -278,7 +283,6 @@ char GetSysMenuRegion(u32 sysVersion) { // From SysCheck
         case 546:
         case 610:
             return 'E';
-            break;
 
         case 128: //2.0J
         case 192: //2.2J
@@ -295,7 +299,6 @@ char GetSysMenuRegion(u32 sysVersion) { // From SysCheck
         case 544:
         case 608:
             return 'J';
-            break;
 
         case 326: //3.3K
         case 390: //3.5K
@@ -304,9 +307,10 @@ char GetSysMenuRegion(u32 sysVersion) { // From SysCheck
         case 486: //4.2K
         case 518: //4.3K
             return 'K';
-            break;
+
+        default:
+            return 'X';
     }
-    return 'X';
 }
 
 u32 RGB2YCBCR(u8 r1, u8 g1, u8 b1) {
@@ -341,27 +345,21 @@ void writetoxfb(void* videoBuffer, u32 offset, u32 length, u32 color)
     }
 }
 
-u32 clamp_u32(u32 x, u32 low, u32 high)
-{
-    if (x < low)
-        return low;
-    if (x > high)
-        return high;
-    return x;
-}
-
-void convert_row(const u8* src_rgb, unsigned src_width, u32* dst_yuv422)
+void
+convert_row(const u8* src_rgb,
+            unsigned src_width,
+            u32* dst_yuv422)
 {
     for (unsigned x = 0; x < src_width; x += 2) {
-        u32 r1 = clamp_u32(src_rgb[3*x + 0], 16, 240);
-        u32 g1 = clamp_u32(src_rgb[3*x + 1], 16, 240);
-        u32 b1 = clamp_u32(src_rgb[3*x + 2], 16, 240);
+        u32 r1 = std::clamp<u32>(src_rgb[3*x + 0], 16u, 240u);
+        u32 g1 = std::clamp<u32>(src_rgb[3*x + 1], 16u, 240u);
+        u32 b1 = std::clamp<u32>(src_rgb[3*x + 2], 16u, 240u);
 
         u32 r2 = 16, g2 = 16, b2 = 16;
         if (x + 1 < src_width) {
-            r2 = clamp_u32(src_rgb[3*x + 3], 16, 240);
-            g2 = clamp_u32(src_rgb[3*x + 4], 16, 240);
-            b2 = clamp_u32(src_rgb[3*x + 5], 16, 240);
+            r2 = std::clamp<u32>(src_rgb[3*x + 3], 16u, 240u);
+            g2 = std::clamp<u32>(src_rgb[3*x + 4], 16u, 240u);
+            b2 = std::clamp<u32>(src_rgb[3*x + 5], 16u, 240u);
         }
 
         u32 Y1 = (( 77u * r1 + 150u * g1 + 29u * b1) / 256u) & 0xffu;
@@ -373,7 +371,9 @@ void convert_row(const u8* src_rgb, unsigned src_width, u32* dst_yuv422)
     }
 }
 
-void blit_png(const u8* data, size_t size)
+void
+blit_png(const u8* data,
+         size_t size)
 {
     png_image img;
     std::memset(&img, 0, sizeof img);
@@ -409,7 +409,8 @@ void blit_png(const u8* data, size_t size)
     }
 }
 
-void show_image(enum ConsoleType t)
+void
+show_image(ConsoleType t)
 {
     switch (t) {
         case ConsoleType::Wii:
@@ -442,7 +443,10 @@ void power_button_callback()
 }
 
 __attribute__(( __format__(__printf__, 3, 4) ))
-int printf_xy(int x, int y, const char* fmt, ...)
+int printf_xy(int x,
+              int y,
+              const char* fmt,
+              ...)
 {
     int r1, r2;
     r1 = printf("\e[%d;%dH", y, x);
@@ -458,8 +462,9 @@ int printf_xy(int x, int y, const char* fmt, ...)
 }
 
 //---------------------------------------------------------------------------------
-int main() {
-
+int
+main()
+{
     bool ahbprot = disable_ahbprot();
     if (!AHBPROT_DISABLED)
         return -1;
@@ -658,5 +663,4 @@ int main() {
 
         VIDEO_WaitVSync();
     }
-
 }
