@@ -242,7 +242,6 @@ GetSysMenuNintendoVersion(u32 sysVersion)
         default:
             return 0.0f;
     }
-
 }
 
 char
@@ -516,13 +515,6 @@ main()
 
     u16 menu_ver = get_tmd_version(0x0000000100000002);
 
-    ConsoleType console_type = ConsoleType::Wii;
-
-    s32 test = IOS_Open("/dev/dolphin", 0);
-    if (test >= 0)
-        console_type = ConsoleType::Dolphin;
-    IOS_Close(test);
-
     char drive_date[15] = "";
     if (ahbprot) { // A wise man once told me that AHBPROT should be absent for homebrew to prosper
         DI_Init();
@@ -541,9 +533,6 @@ main()
     u32 boot2_ver = 0;
     ES_GetBoot2Version(&boot2_ver);
 
-    if (boot2_ver == 0)
-        console_type = ConsoleType::WiiU;
-
     CONF_Init();
 
     u8 nickname[11] = "";
@@ -554,11 +543,18 @@ main()
     std::string serial_number = settings.at("SERNO");
     std::string model = settings.at("MODEL");
 
+    ConsoleType console_type = ConsoleType::Wii;
     if (model.starts_with("RVL-101"))
         console_type = ConsoleType::WiiFamily;
     if (model.starts_with("RVL-201"))
         console_type = ConsoleType::WiiMini;
-
+    if (boot2_ver == 0)
+        console_type = ConsoleType::WiiU;
+    int dolphin_dev = IOS_Open("/dev/dolphin", 0);
+    if (dolphin_dev >= 0) {
+        console_type = ConsoleType::Dolphin;
+        IOS_Close(dolphin_dev);
+    }
     printf_xy(31, 3, "NiioFetch %s", VER);
 
     show_image(console_type);
