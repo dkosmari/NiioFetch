@@ -30,13 +30,11 @@
 
 #define AHBPROT_DISABLED (*(vu32*)0xcd800064 == 0xFFFFFFFF)
 
-DI_DriveID DI_id;
-
 void *xfb = NULL;
 GXRModeObj *rmode = NULL;
 
 
-#define VER "1.3"
+#define VER "1.3-dko"
 
 const std::array languages = {
     "Japanese",
@@ -518,17 +516,18 @@ main()
     char drive_date[15] = "";
     if (ahbprot) { // A wise man once told me that AHBPROT should be absent for homebrew to prosper
         DI_Init();
-        if (!DI_Identify(&DI_id)) {
-            uint32_t y = (DI_id.rel_date >> 16) & 0xffff;
-            uint32_t m = (DI_id.rel_date >>  8) & 0x00ff;
-            uint32_t d = (DI_id.rel_date >>  0) & 0x00ff;
+        DI_DriveID drive;
+        if (!DI_Identify(&drive)) {
+            uint32_t y = (drive.rel_date >> 16) & 0xffff;
+            uint32_t m = (drive.rel_date >>  8) & 0x00ff;
+            uint32_t d = (drive.rel_date >>  0) & 0x00ff;
             snprintf(drive_date, sizeof drive_date, "%04X-%02X-%02X", y, m, d);
         }
         DI_Close();
     }
 
-    u32 numoftitles = 0;
-    ES_GetNumTitles(&numoftitles);
+    u32 num_titles = 0;
+    ES_GetNumTitles(&num_titles);
 
     u32 boot2_ver = 0;
     ES_GetBoot2Version(&boot2_ver);
@@ -602,7 +601,7 @@ main()
     printf_xy(cur_x, 16, "Region : %s", regions.at(CONF_GetRegion()));
     printf_xy(cur_x, 17, "Language : %s", languages.at(CONF_GetLanguage()));
 
-    printf_xy(cur_x, 18, "Titles installed : %d", numoftitles);
+    printf_xy(cur_x, 18, "Titles installed : %d", num_titles);
 
     printf_xy(cur_x, 19, "P1 Battery : %d", WPAD_BatteryLevel(0));
 
