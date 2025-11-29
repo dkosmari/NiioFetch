@@ -51,7 +51,7 @@ static const u32 stage1[] = {
 };
 
 // Run the /dev/sha (Starlet ACE) exploit here to disable AHBPROT. This must be done this way because only Starlet can access the AHBPROT register.
-bool disable_ahbprot()
+bool disable_ahbprot(void)
 {
     if (AHBPROT_DISABLED) {
         return true;

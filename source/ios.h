@@ -24,4 +24,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-bool disable_ahbprot();
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+bool disable_ahbprot(void);
+
+#ifdef __cplusplus
+}
+#endif

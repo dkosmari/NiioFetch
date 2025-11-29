@@ -27,23 +27,25 @@ INCLUDES	:=
 # options for code generation
 #---------------------------------------------------------------------------------
 
-CFLAGS	= -g -Os -Wall -Wextra -Werror $(MACHDEP) $(INCLUDE)
-CXXFLAGS	=	$(CFLAGS)
-
-LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
+CPPFLAGS	=	$(INCLUDE) -D__WII__
+COMMON_FLAGS	:=	-g -Os -Wall -Wextra -Werror $(MACHDEP) -ffunction-sections -fdata-sections
+CFLAGS		:=	$(COMMON_FLAGS)
+CXXFLAGS	:=	$(COMMON_FLAGS) -std=c++23
+LDFLAGS		:=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
+LD += -std=c++23
 
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
-LIBS	:=	-lwiiuse -lbte -logc -lm -ldi
+LIBS		:=	-lwiiuse -lbte -logc -lm -ldi
 
 PKG_CONFIG := $(PREFIX)pkg-config
 
 LIBPNG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libpng)
 LIBPNG_LIBS := $(shell $(PKG_CONFIG) --libs libpng)
 
-CPPFLAGS := $(LIBPNG_CFLAGS)
-LIBS += $(LIBPNG_LIBS)
+CPPFLAGS	+= $(LIBPNG_CFLAGS)
+LIBS		+= $(LIBPNG_LIBS)
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
@@ -155,5 +157,5 @@ endif
 company: compile_flags.txt
 
 compile_flags.txt: Makefile
-	printf "%s" "$(CPPFLAGS) $(INCLUDE) -DGECKO -D__WII__" | xargs -n1 | sort -u > compile_flags.txt
+	printf "%s" "$(CPPFLAGS) -DGECKO -D__WII__" | xargs -n1 | sort -u > compile_flags.txt
 	$(CPP) -xc /dev/null -E -Wp,-v -mrvl 2>&1 | sed -n 's,^ ,-I,p' >> compile_flags.txt

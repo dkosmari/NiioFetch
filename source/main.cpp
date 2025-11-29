@@ -1,8 +1,14 @@
-#include <stdatomic.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <array>
+#include <atomic>
+#include <cstdlib>
+#include <cstring>
 #include <stdarg.h>
+#include <stdio.h>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <di/di.h>
 #include <gccore.h>
@@ -20,6 +26,7 @@
 #include "wii-mini-image_png.h"
 #include "wiiu-image_png.h"
 
+
 #define AHBPROT_DISABLED (*(vu32*)0xcd800064 == 0xFFFFFFFF)
 
 DI_DriveID DI_id;
@@ -27,11 +34,10 @@ DI_DriveID DI_id;
 void *xfb = NULL;
 GXRModeObj *rmode = NULL;
 
-extern int __CONF_GetTxt(const char *name, char *buf, int length);
 
 #define VER "1.3"
 
-const char *languages[] = {
+const std::array languages = {
     "Japanese",
     "English",
     "German",
@@ -40,25 +46,95 @@ const char *languages[] = {
     "Dutch",
     "Chinese (Simplified)",
     "Chinese (Traditonal)",
-    "Korean"
+    "Korean",
 };
 
-const char *regions[] = {
+const std::array regions = {
     "Japan",
     "USA",
     "Europe",
     "NULL",
     "Korea",
-    "China"
+    "China",
 };
 
-enum ConsoleType {
-    TypeWii,
-    TypeWiiFamily,
-    TypeWiiMini,
-    TypeWiiU,
-    TypeDolphin
+enum class ConsoleType {
+    Wii,
+    WiiFamily,
+    WiiMini,
+    WiiU,
+    Dolphin
 };
+
+std::unordered_map<std::string, std::string> settings;
+
+std::string_view
+trimmed(const std::string_view& s)
+{
+    const char* spaces = " \t\r\n";
+    auto start = s.find_first_not_of(spaces);
+    if (start == std::string::npos)
+        return s;
+    auto finish = s.find_last_not_of(spaces) + 1;
+    return s.substr(start, finish - start);
+}
+
+bool
+getline(std::string_view& input,
+        std::string_view& line)
+{
+    if (input.empty())
+        return false;
+    const char* eol = "\n\r";
+    auto pos = input.find_first_of(eol);
+    if (pos == std::string_view::npos) {
+        line = {};
+        input = {};
+        return false;
+    } else {
+        line = input.substr(0, pos);
+        pos = input.find_first_not_of(eol, pos);
+        if (pos != std::string_view::npos)
+            input.remove_prefix(pos);
+        else
+            input = {};
+    }
+    return true;
+}
+
+void load_settings()
+{
+    std::array<char, 0x100> settings_buf alignas(32);
+    int fd = IOS_Open("/title/00000001/00000002/data/setting.txt", IPC_OPEN_READ);
+    if (fd < 0)
+        return;
+    int r = IOS_Read(fd, settings_buf.data(), settings_buf.size());
+    IOS_Close(fd);
+    if (r < 0)
+        return;
+
+    u32 key = 0x73B5DBFA;
+    for (auto& c : settings_buf) {
+        c ^= key & 0xff;
+        key = (key << 1) | (key >> 31);
+    }
+
+    settings.clear();
+
+    std::string_view input(settings_buf.data(), r);
+    std::string_view line;
+    while (getline(input, line)) {
+        line = trimmed(line);
+        if  (line.empty())
+            continue;
+        auto pos = line.find('=');
+        if (pos == std::string::npos)
+            continue;
+        std::string key{line.substr(0, pos)};
+        std::string value{line.substr(pos + 1)};
+        settings[key] = std::move(value);
+    }
+}
 
 u16 get_tmd_version(u64 title) { // From the homebrew channel
     STACK_ALIGN(u8, tmdbuf, 1024, 32);
@@ -78,70 +154,59 @@ u16 get_tmd_version(u64 title) { // From the homebrew channel
     return (tmdbuf[88] << 8) | tmdbuf[89];
 }
 
-float GetSysMenuNintendoVersion(u32 sysVersion) { // From SysCheck
-    float ninVersion = 0.0;
-
+float GetSysMenuNintendoVersion(u32 sysVersion)
+{
+    // From SysCheck
     switch (sysVersion) {
         case 33:
-            ninVersion = 1.0f;
-            break;
+            return 1.0f;
 
         case 97:
         case 128:
         case 130:
-            ninVersion = 2.0f;
-            break;
+            return 2.0f;
 
         case 162:
-            ninVersion = 2.1f;
-            break;
+            return 2.1f;
 
         case 192:
         case 193:
         case 194:
-            ninVersion = 2.2f;
-            break;
+            return 2.2f;
 
         case 224:
         case 225:
         case 226:
-            ninVersion = 3.0f;
-            break;
+            return 3.0f;
 
         case 256:
         case 257:
         case 258:
-            ninVersion = 3.1f;
-            break;
+            return 3.1f;
 
         case 288:
         case 289:
         case 290:
-            ninVersion = 3.2f;
-            break;
+            return 3.2f;
 
         case 352:
         case 353:
         case 354:
         case 326:
-            ninVersion = 3.3f;
-            break;
+            return 3.3f;
 
         case 384:
         case 385:
         case 386:
-            ninVersion = 3.4f;
-            break;
+            return 3.4f;
 
         case 390:
-            ninVersion = 3.5f;
-            break;
+            return 3.5f;
 
         case 416:
         case 417:
         case 418:
-            ninVersion = 4.0f;
-            break;
+            return 4.0f;
 
         case 448:
         case 449:
@@ -151,15 +216,13 @@ float GetSysMenuNintendoVersion(u32 sysVersion) { // From SysCheck
         case 54449:
         case 54450:
         case 54454:
-            ninVersion = 4.1f;
-            break;
+            return 4.1f;
 
         case 480:
         case 481:
         case 482:
         case 486:
-            ninVersion = 4.2f;
-            break;
+            return 4.2f;
 
         case 512:
         case 513:
@@ -171,11 +234,12 @@ float GetSysMenuNintendoVersion(u32 sysVersion) { // From SysCheck
         case 608:
         case 609:
         case 610:
-            ninVersion = 4.3f;
-            break;
+            return 4.3f;
+
+        default:
+            return 0.0f;
     }
 
-    return ninVersion;
 }
 
 char GetSysMenuRegion(u32 sysVersion) { // From SysCheck
@@ -311,75 +375,77 @@ void convert_row(const u8* src_rgb, unsigned src_width, u32* dst_yuv422)
 
 void blit_png(const u8* data, size_t size)
 {
-    const unsigned screen_x = 8;
-    const unsigned screen_y = 80;
-    unsigned max_width = rmode->fbWidth - screen_x;
-    unsigned max_height = rmode->xfbHeight - screen_y;
-
     png_image img;
-    memset(&img, 0, sizeof img);
-    img.version = PNG_IMAGE_VERSION;
-    if (!png_image_begin_read_from_memory(&img, data, size)) {
+    std::memset(&img, 0, sizeof img);
+    try {
+        const unsigned screen_x = 8;
+        const unsigned screen_y = 80;
+        unsigned max_width = rmode->fbWidth - screen_x;
+        unsigned max_height = rmode->xfbHeight - screen_y;
+
+        img.version = PNG_IMAGE_VERSION;
+        if (!png_image_begin_read_from_memory(&img, data, size)) {
+            png_image_free(&img);
+            return;
+        }
+        img.format = PNG_FORMAT_RGB;
+        std::vector<u8> pixels(img.width * img.height * 3);
+        png_image_finish_read(&img, NULL, pixels.data(), 3 * img.width, NULL);
+
+        if (img.height < max_height)
+            max_height = img.height;
+        if (img.width < max_width)
+            max_width = img.width;
+        for (unsigned y = 0; y < max_height; ++y) {
+            const u8* src_row = pixels.data() + 3 * (y * img.width);
+            u32* dst_row = ((u32*)xfb) + ((y + screen_y) * rmode->fbWidth + screen_x) / 2;
+            convert_row(src_row, max_width, dst_row);
+        }
+
         png_image_free(&img);
-        return;
     }
-    img.format = PNG_FORMAT_RGB;
-    u8* pixels = calloc(img.width * img.height, 3);
-    png_image_finish_read(&img, NULL, pixels, 3 * img.width, NULL);
-
-    if (img.height < max_height)
-        max_height = img.height;
-    if (img.width < max_width)
-        max_width = img.width;
-    for (unsigned y = 0; y < max_height; ++y) {
-        const u8* src_row = pixels + 3 * (y * img.width);
-        u32* dst_row = ((u32*)xfb) + ((y + screen_y) * rmode->fbWidth + screen_x) / 2;
-        convert_row(src_row, max_width, dst_row);
+    catch (...) {
+        png_image_free(&img);
     }
-
-    free(pixels);
-    png_image_free(&img);
 }
 
-void show_image(enum ConsoleType t) {
+void show_image(enum ConsoleType t)
+{
     switch (t) {
-        case TypeWii:
+        case ConsoleType::Wii:
             blit_png(wii_image_png, wii_image_png_size);
             break;
 
-        case TypeWiiFamily:
+        case ConsoleType::WiiFamily:
             blit_png(wii_family_image_png, wii_family_image_png_size);
             break;
 
-        case TypeWiiMini:
+        case ConsoleType::WiiMini:
             blit_png(wii_mini_image_png, wii_mini_image_png_size);
             break;
 
-        case TypeWiiU:
+        case ConsoleType::WiiU:
             blit_png(wiiu_image_png, wiiu_image_png_size);
             break;
 
-        case TypeDolphin:
+        case ConsoleType::Dolphin:
             blit_png(dolphin_image_png, dolphin_image_png_size);
-            break;
-
-        default:
             break;
     }
 }
 
-atomic_bool power_pressed;
+std::atomic_bool power_button_pressed;
 
-static void power_callback(void)
+void power_button_callback()
 {
-    atomic_store(&power_pressed, true);
+    power_button_pressed = true;
 }
 
 __attribute__(( __format__(__printf__, 3, 4) ))
 int printf_xy(int x, int y, const char* fmt, ...)
 {
     int r1, r2;
-    r1 = printf("\x1b[%d;%dH", y, x);
+    r1 = printf("\e[%d;%dH", y, x);
     if (r1 < 0)
         return r1;
     va_list args;
@@ -392,64 +458,14 @@ int printf_xy(int x, int y, const char* fmt, ...)
 }
 
 //---------------------------------------------------------------------------------
-int main(void) {
-    //---------------------------------------------------------------------------------
-
-    // Initialise the video system
-    VIDEO_Init();
-
-    // This function initialises the attached controllers
-    WPAD_Init();
+int main() {
 
     bool ahbprot = disable_ahbprot();
-
     if (!AHBPROT_DISABLED)
         return -1;
 
-    CONF_Init();
-
-    u16 SMVER = get_tmd_version(0x0000000100000002);
-
-    enum ConsoleType console_type = TypeWii;
-
-    s32 test = IOS_Open("/dev/dolphin", 0);
-    if (test >= 0)
-        console_type = TypeDolphin;
-    IOS_Close(test);
-
-    u8 nickname[11];
-    char drive_date[15] = "";
-    char serial_number[11];
-    char serial_prefix[4];
-    char model[14];
-    u32 boot2ver = 0;
-    u32 numoftitles = 0;
-    if (ahbprot) { // A wise man once told me that AHBPROT should be absent for homebrew to prosper
-        DI_Init();
-        if (!DI_Identify(&DI_id)) {
-            uint32_t y = (DI_id.rel_date >> 16) & 0xffff;
-            uint32_t m = (DI_id.rel_date >>  8) & 0x00ff;
-            uint32_t d = (DI_id.rel_date >>  0) & 0x00ff;
-            snprintf(drive_date, sizeof drive_date, "%04X-%02X-%02X", y, m, d);
-        }
-        DI_Close();
-    }
-
-    ES_GetNumTitles(&numoftitles);
-    ES_GetBoot2Version(&boot2ver);
-
-    if (boot2ver == 0)
-        console_type = TypeWiiU;
-
-    CONF_GetNickName(nickname);
-    __CONF_GetTxt("CODE", serial_prefix, sizeof serial_prefix);
-    __CONF_GetTxt("SERNO", serial_number, sizeof serial_number);
-    __CONF_GetTxt("MODEL", model, sizeof model);
-
-    if (!strncmp(model, "RVL-101", 7))
-        console_type = TypeWiiFamily;
-    if (!strncmp(model, "RVL-201", 7))
-        console_type = TypeWiiMini;
+    // Initialise the video system
+    VIDEO_Init();
 
     // Obtain the preferred video mode from the system
     // This will correspond to the settings in the Wii menu
@@ -457,14 +473,6 @@ int main(void) {
 
     // Allocate memory for the display in the uncached region
     xfb = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
-
-    // Initialise the console, required for printf
-    console_init(xfb,
-                 16, 16,
-                 rmode->fbWidth - 16,
-                 rmode->xfbHeight - 16,
-                 rmode->fbWidth * VI_DISPLAY_PIX_SZ);
-    //SYS_STDIO_Report(true);
 
     // Set up the video registers with the chosen mode
     VIDEO_Configure(rmode);
@@ -486,6 +494,66 @@ int main(void) {
     if (rmode->viTVMode & VI_NON_INTERLACE)
         VIDEO_WaitVSync();
 
+    // Initialise the console, required for printf
+    CON_Init(xfb,
+             16, 16,
+             rmode->fbWidth - 16,
+             rmode->xfbHeight - 16,
+             rmode->fbWidth * VI_DISPLAY_PIX_SZ);
+    CON_EnableGecko(1, 0);
+
+    // Clear screen.
+    printf("\e[2J");
+    fflush(stdout);
+
+    // This function initialises the attached controllers
+    WPAD_Init();
+
+    u16 menu_ver = get_tmd_version(0x0000000100000002);
+
+    ConsoleType console_type = ConsoleType::Wii;
+
+    s32 test = IOS_Open("/dev/dolphin", 0);
+    if (test >= 0)
+        console_type = ConsoleType::Dolphin;
+    IOS_Close(test);
+
+    char drive_date[15] = "";
+    if (ahbprot) { // A wise man once told me that AHBPROT should be absent for homebrew to prosper
+        DI_Init();
+        if (!DI_Identify(&DI_id)) {
+            uint32_t y = (DI_id.rel_date >> 16) & 0xffff;
+            uint32_t m = (DI_id.rel_date >>  8) & 0x00ff;
+            uint32_t d = (DI_id.rel_date >>  0) & 0x00ff;
+            snprintf(drive_date, sizeof drive_date, "%04X-%02X-%02X", y, m, d);
+        }
+        DI_Close();
+    }
+
+    u32 numoftitles = 0;
+    ES_GetNumTitles(&numoftitles);
+
+    u32 boot2_ver = 0;
+    ES_GetBoot2Version(&boot2_ver);
+
+    if (boot2_ver == 0)
+        console_type = ConsoleType::WiiU;
+
+    CONF_Init();
+
+    u8 nickname[11] = "";
+    CONF_GetNickName(nickname);
+
+    load_settings();
+    std::string serial_prefix = settings.at("CODE");
+    std::string serial_number = settings.at("SERNO");
+    std::string model = settings.at("MODEL");
+
+    if (model.starts_with("RVL-101"))
+        console_type = ConsoleType::WiiFamily;
+    if (model.starts_with("RVL-201"))
+        console_type = ConsoleType::WiiMini;
+
     printf_xy(31, 3, "NiioFetch %s", VER);
 
     show_image(console_type);
@@ -494,22 +562,22 @@ int main(void) {
 
     printf_xy(cur_x, 5, "Running on IOS : %d", IOS_GetVersion());
     switch (console_type) {
-        case TypeWii:
-        case TypeWiiFamily:
-        case TypeWiiMini:
+        case ConsoleType::Wii:
+        case ConsoleType::WiiFamily:
+        case ConsoleType::WiiMini:
             printf_xy(cur_x, 6, "CPU : IBM PowerPC 750CL");
             break;
 
-        case TypeWiiU:
+        case ConsoleType::WiiU:
             printf_xy(cur_x, 6, "CPU : IBM \"Espresso\"");
             break;
 
-        case TypeDolphin:
+        case ConsoleType::Dolphin:
             printf_xy(cur_x, 6, "CPU : Emulated CPU");
             break;
     }
     s32 net_heap = iosCreateHeap(1024);
-    u8* mac = iosAlloc(net_heap, 6);
+    u8* mac = reinterpret_cast<u8*>(iosAlloc(net_heap, 6));
     memset(mac, 0, 6);
     s32 fd = IOS_Open("/dev/net/wd/command", 3);
     IOS_IoctlvFormat(net_heap, fd, 0x100e, ":d", mac, 6);
@@ -518,18 +586,20 @@ int main(void) {
     IOS_Close(fd);
     iosFree(net_heap, mac);
 
-    printf_xy(cur_x, 8, "System Menu : %.1f%c", GetSysMenuNintendoVersion(SMVER), GetSysMenuRegion(SMVER));
-    printf_xy(cur_x, 9, "Boot2 : v%d", boot2ver);
+    printf_xy(cur_x, 8, "System Menu : %.1f%c",
+              GetSysMenuNintendoVersion(menu_ver),
+              GetSysMenuRegion(menu_ver));
+    printf_xy(cur_x, 9, "Boot2 : v%d", boot2_ver);
     printf_xy(cur_x, 10, "Drive Date : %s", drive_date);
     printf_xy(cur_x, 11, "Hollywood Revision : 0x%X", SYS_GetHollywoodRevision());
     printf_xy(cur_x, 12, "Resolution : %d%c", rmode->viHeight, VIDEO_GetVideoScanMode() ? 'p' : 'i');
 
     printf_xy(cur_x, 13, "Nickname : %s", nickname);
-    printf_xy(cur_x, 14, "Wii Model : %s", model);
-    printf_xy(cur_x, 15, "Serial : %s%s", serial_prefix, serial_number);
+    printf_xy(cur_x, 14, "Wii Model : %s", model.data());
+    printf_xy(cur_x, 15, "Serial : %s%s", serial_prefix.data(), serial_number.data());
 
-    printf_xy(cur_x, 16, "Region : %s", regions[CONF_GetRegion()]);
-    printf_xy(cur_x, 17, "Language : %s", languages[CONF_GetLanguage()]);
+    printf_xy(cur_x, 16, "Region : %s", regions.at(CONF_GetRegion()));
+    printf_xy(cur_x, 17, "Language : %s", languages.at(CONF_GetLanguage()));
 
     printf_xy(cur_x, 18, "Titles installed : %d", numoftitles);
 
@@ -558,21 +628,21 @@ int main(void) {
         writetoxfb(xfb, 160 + 84 + i*320, 12,  COLOR_WHITE);
     }
 
-    SYS_SetPowerCallback(power_callback);
+    SYS_SetPowerCallback(power_button_callback);
 
     bool running = true;
     while (running) {
-        printf_xy(cur_x, 19, "P1 Battery : %d    ", WPAD_BatteryLevel(0));
+        printf_xy(cur_x, 19, "\e[0KP1 Battery : %d", WPAD_BatteryLevel(0));
         fflush(stdout);
 
         if (SYS_ResetButtonDown()) {
-            printf_xy(24, 22, "RESET pressed, exiting...");
+            printf_xy(24, 22, "RESET button pressed, exiting...");
             fflush(stdout);
             running = false;
         }
 
-        if (atomic_load(&power_pressed)) {
-            printf_xy(24, 22, "POWER pressed, exiting...");
+        if (power_button_pressed) {
+            printf_xy(24, 22, "POWER button pressed, exiting...");
             fflush(stdout);
             running = false;
         }
@@ -581,11 +651,12 @@ int main(void) {
         u32 pressed = WPAD_ButtonsDown(0);
 
         if (pressed & WPAD_BUTTON_HOME) {
-            printf_xy(24, 22, "HOME pressed, exiting...");
+            printf_xy(24, 22, "HOME button pressed, exiting...");
             fflush(stdout);
             running = false;
         }
 
         VIDEO_WaitVSync();
     }
+
 }
