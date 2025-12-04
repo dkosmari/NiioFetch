@@ -310,6 +310,40 @@ GetSysMenuRegion(u32 sysVersion)
     }
 }
 
+const char*
+get_odd_date()
+{
+    static char drive_date[15] = "";
+    DI_Init();
+    DI_DriveID drive;
+    if (!DI_Identify(&drive)) {
+        uint32_t y = (drive.rel_date >> 16) & 0xffff;
+        uint32_t m = (drive.rel_date >>  8) & 0x00ff;
+        uint32_t d = (drive.rel_date >>  0) & 0x00ff;
+        snprintf(drive_date, sizeof drive_date, "%04X-%02X-%02X", y, m, d);
+    }
+    DI_Close();
+    return drive_date;
+}
+
+const char*
+get_wifi_mac()
+{
+    static char result[2*6 + 5 + 1] = "";
+    s32 net_heap = iosCreateHeap(1024);
+    u8* mac = reinterpret_cast<u8*>(iosAlloc(net_heap, 6));
+    memset(mac, 0, 6);
+    s32 fd = IOS_Open("/dev/net/wd/command", 3);
+    if  (fd >= 0) {
+        IOS_IoctlvFormat(net_heap, fd, 0x100e, ":d", mac, 6);
+        snprintf(result, sizeof result, "%02X-%02X-%02X-%02X-%02X-%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        IOS_Close(fd);
+    }
+    iosFree(net_heap, mac);
+    return result;
+}
+
 u32 RGB2YCBCR(u8 r1, u8 g1, u8 b1) {
     u8 r2 = r1; u8 g2 = g1; u8 b2 = b1;
     if (r1 < 16) r1 = 16;
@@ -432,11 +466,44 @@ show_image(ConsoleType t)
     }
 }
 
+float
+get_battery_volts(u8 raw)
+{
+    float m = 0.00522192f;
+    float b = 2.154361f;
+    return m * raw + b;
+}
+
+float
+get_battery_percent(u8 raw)
+{
+    // Source: https://github.com/dolphin-emu/dolphin/pull/8908
+    return 100.0f * raw * 2.46f / 255.0f - 0.013f;
+}
+
 std::atomic_bool power_button_pressed;
 
 void power_button_callback()
 {
     power_button_pressed = true;
+}
+
+int
+set_cursor(int x, int y)
+{
+    return printf("\e[%d;%dH", y, x);
+}
+
+int
+clear_line_forward()
+{
+    return printf("\e[0K");
+}
+
+int
+clear_screen()
+{
+    return printf("\e[2J");
 }
 
 __attribute__(( __format__(__printf__, 3, 4) ))
@@ -445,24 +512,51 @@ int printf_xy(int x,
               const char* fmt,
               ...)
 {
-    int r1, r2;
-    r1 = printf("\e[%d;%dH", y, x);
+    int r1 = set_cursor(x, y);
     if (r1 < 0)
         return r1;
     va_list args;
     va_start(args, fmt);
-    r2 = vprintf(fmt, args);
+    int r2 = vprintf(fmt, args);
     va_end(args);
     if (r2 < 0)
         return r2;
     return r1 + r2;
 }
 
+void
+show_battery(int channel)
+{
+    // Clear this line.
+    const int cur_x = 48;
+    set_cursor(cur_x, 19 + channel);
+    clear_line_forward();
+
+    static const std::array names = {
+        "WM 1",
+        "WM 2",
+        "WM 3",
+        "WM 4",
+        "BB",
+        "Unknown",
+    };
+
+    if (WPAD_Probe(channel, nullptr))
+        return;
+
+    u8 bat = WPAD_BatteryLevel(channel);
+    printf("%s Bat : %2.0f%% (%1.2fV, %u)",
+           names[channel],
+           get_battery_percent(bat),
+           get_battery_volts(bat),
+           unsigned{bat});
+}
+
 //---------------------------------------------------------------------------------
 int
 main()
 {
-    bool ahbprot = disable_ahbprot();
+    disable_ahbprot();
     if (!AHBPROT_DISABLED)
         return -1;
 
@@ -504,27 +598,15 @@ main()
              rmode->fbWidth * VI_DISPLAY_PIX_SZ);
     CON_EnableGecko(1, 0);
 
-    // Clear screen.
-    printf("\e[2J");
-    fflush(stdout);
+    clear_screen();
 
-    // This function initialises the attached controllers
     WPAD_Init();
 
     u16 menu_ver = get_tmd_version(0x0000000100000002);
 
-    char drive_date[15] = "";
-    if (ahbprot) { // A wise man once told me that AHBPROT should be absent for homebrew to prosper
-        DI_Init();
-        DI_DriveID drive;
-        if (!DI_Identify(&drive)) {
-            uint32_t y = (drive.rel_date >> 16) & 0xffff;
-            uint32_t m = (drive.rel_date >>  8) & 0x00ff;
-            uint32_t d = (drive.rel_date >>  0) & 0x00ff;
-            snprintf(drive_date, sizeof drive_date, "%04X-%02X-%02X", y, m, d);
-        }
-        DI_Close();
-    }
+    const char* drive_date = get_odd_date();
+
+    const char* wifi_mac = get_wifi_mac();
 
     u32 num_titles = 0;
     ES_GetNumTitles(&num_titles);
@@ -542,6 +624,7 @@ main()
     std::string serial_number = settings.at("SERNO");
     std::string model = settings.at("MODEL");
 
+    // Detect the console type.
     ConsoleType console_type = ConsoleType::Wii;
     if (model.starts_with("RVL-101"))
         console_type = ConsoleType::WiiFamily;
@@ -554,6 +637,9 @@ main()
         console_type = ConsoleType::Dolphin;
         IOS_Close(dolphin_dev);
     }
+
+    // Start printing.
+
     printf_xy(31, 3, "NiioFetch %s", VER);
 
     show_image(console_type);
@@ -576,23 +662,16 @@ main()
             printf_xy(cur_x, 6, "CPU : Emulated CPU");
             break;
     }
-    s32 net_heap = iosCreateHeap(1024);
-    u8* mac = reinterpret_cast<u8*>(iosAlloc(net_heap, 6));
-    memset(mac, 0, 6);
-    s32 fd = IOS_Open("/dev/net/wd/command", 3);
-    IOS_IoctlvFormat(net_heap, fd, 0x100e, ":d", mac, 6);
-    printf_xy(cur_x, 7, "WiFi MAC : %02X-%02X-%02X-%02X-%02X-%02X",
-              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    IOS_Close(fd);
-    iosFree(net_heap, mac);
-
+    printf_xy(cur_x, 7, "WiFi MAC : %s", wifi_mac);
     printf_xy(cur_x, 8, "System Menu : %.1f%c",
               GetSysMenuNintendoVersion(menu_ver),
               GetSysMenuRegion(menu_ver));
     printf_xy(cur_x, 9, "Boot2 : v%d", boot2_ver);
     printf_xy(cur_x, 10, "Drive Date : %s", drive_date);
     printf_xy(cur_x, 11, "Hollywood Revision : 0x%X", SYS_GetHollywoodRevision());
-    printf_xy(cur_x, 12, "Resolution : %d%c", rmode->viHeight, VIDEO_GetVideoScanMode() ? 'p' : 'i');
+    printf_xy(cur_x, 12, "Resolution : %d%c",
+              rmode->viHeight,
+              VIDEO_GetVideoScanMode() ? 'p' : 'i');
 
     printf_xy(cur_x, 13, "Nickname : %s", nickname);
     printf_xy(cur_x, 14, "Wii Model : %s", model.data());
@@ -602,10 +681,6 @@ main()
     printf_xy(cur_x, 17, "Language : %s", languages.at(CONF_GetLanguage()));
 
     printf_xy(cur_x, 18, "Titles installed : %d", num_titles);
-
-    printf_xy(cur_x, 19, "P1 Battery : %d", WPAD_BatteryLevel(0));
-
-    fflush(stdout);
 
     for (int i = 400; i < 416; i++) {
         writetoxfb(xfb, 160 + i*320, 12, COLOR_BLACK);
@@ -631,31 +706,49 @@ main()
     SYS_SetPowerCallback(power_button_callback);
 
     bool running = true;
+    unsigned frames = 0;
     while (running) {
-        printf_xy(cur_x, 19, "\e[0KP1 Battery : %d", WPAD_BatteryLevel(0));
-        fflush(stdout);
+
+        if ((frames % 60) == 0)
+            for (int i = WPAD_CHAN_0; i < WPAD_MAX_DEVICES; ++i)
+                WPAD_PadStatus(i);
+
+        WPAD_ScanPads();
+
+        for (int i = WPAD_CHAN_0; i < WPAD_MAX_DEVICES; ++i)
+            show_battery(i);
 
         if (SYS_ResetButtonDown()) {
-            printf_xy(24, 22, "RESET button pressed, exiting...");
-            fflush(stdout);
+            printf_xy(24, 24, "RESET button pressed, exiting...");
             running = false;
         }
 
         if (power_button_pressed) {
-            printf_xy(24, 22, "POWER button pressed, exiting...");
-            fflush(stdout);
+            printf_xy(24, 24, "POWER button pressed, exiting...");
             running = false;
         }
 
-        WPAD_ScanPads();
-        u32 pressed = WPAD_ButtonsDown(0);
+        for (int i = WPAD_CHAN_0; i < WPAD_MAX_DEVICES; ++i) {
+            if (WPAD_Probe(i, nullptr))
+                continue;
 
-        if (pressed & WPAD_BUTTON_HOME) {
-            printf_xy(24, 22, "HOME button pressed, exiting...");
-            fflush(stdout);
-            running = false;
+            u32 pressed = WPAD_ButtonsDown(i);
+            if (pressed & WPAD_BUTTON_HOME) {
+                printf_xy(24, 24, "HOME button pressed, exiting...");
+                running = false;
+            }
+
+            u32 held = WPAD_ButtonsHeld(i);
+            if (held & WPAD_BUTTON_A) {
+                WPAD_Rumble(i, 1);
+            } else {
+                WPAD_Rumble(i, 0);
+            }
         }
 
+        fflush(stdout);
         VIDEO_WaitVSync();
+
+        ++frames;
     }
 }
