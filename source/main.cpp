@@ -14,6 +14,7 @@
 #include <di/di.h>
 #include <gccore.h>
 #include <ogc/machine/processor.h>
+#include <ogc/pad.h>
 #include <ogc/system.h>
 #include <wiiuse/wpad.h>
 
@@ -26,6 +27,11 @@
 #include "wii-family-image_png.h"
 #include "wii-mini-image_png.h"
 #include "wiiu-image_png.h"
+
+// #define USE_LIBOGC2
+#ifdef USE_LIBOGC2
+#define VIDEO_GetVideoScanMode VIDEO_GetScanMode
+#endif
 
 
 #define AHBPROT_DISABLED (*(vu32*)0xcd800064 == 0xFFFFFFFF)
@@ -137,7 +143,7 @@ load_settings()
 }
 
 u16 get_tmd_version(u64 title) { // From the homebrew channel
-    STACK_ALIGN(u8, tmdbuf, 1024, 32);
+    u8 tmdbuf[1024] alignas(32);
     u32 tmd_view_size = 0;
     s32 res;
 
@@ -147,7 +153,11 @@ u16 get_tmd_version(u64 title) { // From the homebrew channel
 
     if (tmd_view_size > 1024) return 0;
 
+#ifdef USE_LIBOGC2
+    ES_GetTMDView(title, tmdbuf, tmd_view_size);
+#else
     ES_GetTMDView(title, (tmd_view*)tmdbuf, tmd_view_size);
+#endif
 
     if (res < 0) return 0;
 
@@ -475,10 +485,95 @@ get_battery_volts(u8 raw)
 }
 
 float
+get_battery_volts_board(u8 raw)
+{
+    // TODO
+    return 0 * raw;
+}
+
+unsigned
+get_battery_bars(u8 raw)
+{
+    if (raw >= 0x55)
+        return 4; // (2.593, 3.2]
+    if (raw >= 0x44)
+        return 3; // (2.504, 2.593]
+    if (raw >= 0x33)
+        return 2; // (2.415, 2.504]
+    if (raw >= 0x03)
+        return 1; // (2.164, 2.415]
+    return 0; // (0, 2.164]
+}
+
+unsigned
+get_battery_bars_board(u8 raw)
+{
+    if (raw >= 0x82)
+        return 4;
+    if (raw >= 0x7d)
+        return 3;
+    if (raw >= 0x78)
+        return 2;
+    if (raw >= 0x6a)
+        return 1;
+    return 0;
+}
+
+const char*
+bars_to_string(unsigned b)
+{
+    switch (b) {
+        case 0:
+            return "[----}";
+        case 1:
+            return "[#---}";
+        case 2:
+            return "[##--}";
+        case 3:
+            return "[###-}";
+        case 4:
+            return "[####}";
+        default:
+            return "error";
+    }
+}
+
+float
+remap(float x,
+      float src_min, float src_max,
+      float dst_min, float dst_max)
+{
+    return (x - src_min) * (dst_max - dst_min) / (src_max - src_min);
+}
+
+float
 get_battery_percent(u8 raw)
 {
-    // Source: https://github.com/dolphin-emu/dolphin/pull/8908
-    return 100.0f * raw * 2.46f / 255.0f - 0.013f;
+    // Use a piecewise linar approximation.
+    if (raw >= 0x55)
+        return remap(raw, 0x55, 0x7c, 80, 100);
+    if (raw >= 0x44)
+        return remap(raw, 0x44, 0x55, 60, 80);
+    if (raw >= 0x33)
+        return remap(raw, 0x33, 0x44, 40, 60);
+    if (raw >= 0x03)
+        return remap(raw, 0x03, 0x33, 20, 40);
+    return remap(raw, 0x00, 0x03, 0, 20);
+}
+
+float
+get_battery_percent_board(u8 raw)
+{
+    // Use a piecewise linear approximation.
+    if (raw >= 0x82)
+        return remap(raw, 0x82, 0x86, 75, 100);
+    if (raw >= 0x7d)
+        return remap(raw, 0x7d, 0x72, 50, 75);
+    if (raw >= 0x78)
+        return remap(raw, 0x78, 0x7d, 25, 50);
+    if (raw >= 0x6a)
+        return remap(raw, 0x6a, 0x78, 0, 25);
+    return 0;
 }
 
 std::atomic_bool power_button_pressed;
@@ -525,31 +620,65 @@ int printf_xy(int x,
 }
 
 void
-show_battery(int channel)
+show_wiimote(int channel)
 {
-    // Clear this line.
-    const int cur_x = 48;
-    set_cursor(cur_x, 19 + channel);
-    clear_line_forward();
-
-    static const std::array names = {
-        "WM 1",
-        "WM 2",
-        "WM 3",
-        "WM 4",
-        "BB",
-        "Unknown",
-    };
-
-    if (WPAD_Probe(channel, nullptr))
+    if (channel < 0)
         return;
 
+    const int cur_x = 48;
+    const int cur_y = 19 + channel;
+    set_cursor(cur_x, cur_y);
+    clear_line_forward();
+
+    u32 ext;
+    if (WPAD_Probe(channel, &ext))
+        return;
+
+    static const std::array names = {
+        "Wiimote 1",
+        "Wiimote 2",
+        "Wiimote 3",
+        "Wiimote 4",
+    };
+
+    static const std::array ext_names = {
+        "none",
+        "nunchuk",
+        "classic",
+        "guitar",
+    };
+
     u8 bat = WPAD_BatteryLevel(channel);
-    printf("%s Bat : %2.0f%% (%1.2fV, %u)",
-           names[channel],
-           get_battery_percent(bat),
-           get_battery_volts(bat),
-           unsigned{bat});
+
+    auto name = static_cast<unsigned>(channel) < names.size() ? names[channel] : "Unknown";
+    if (ext == WPAD_EXP_WIIBOARD) {
+        auto data = WPAD_Data(channel);
+        bat = data->exp.wb.rbat;
+        printf("Bal. Board : %s (%2.0f%% %1.1fV, %u)",
+               bars_to_string(get_battery_bars_board(bat)),
+               get_battery_percent_board(bat),
+               get_battery_volts_board(bat),
+               unsigned{bat});
+        set_cursor(cur_x, cur_y + 1);
+        clear_line_forward();
+        printf("weight: %.1f, temp: %u",
+               data->exp.wb.weight,
+               unsigned{data->exp.wb.rtemp});
+    } else if (ext == WPAD_EXP_NONE) {
+        printf("%s : %s (%2.0f%% %1.1fV)",
+               name,
+               bars_to_string(get_battery_bars(bat)),
+               get_battery_percent(bat),
+               get_battery_volts(bat));
+    } else {
+        auto ename = ext < ext_names.size() ? ext_names[ext] : "?";
+        printf("%s (+%s) : %s (%2.0f%% %1.1fV)",
+               name,
+               ename,
+               bars_to_string(get_battery_bars(bat)),
+               get_battery_percent(bat),
+               get_battery_volts(bat));
+    }
 }
 
 //---------------------------------------------------------------------------------
@@ -592,15 +721,15 @@ main()
 
     // Initialise the console, required for printf
     CON_Init(xfb,
-             16, 16,
+             8, 8,
              rmode->fbWidth - 16,
              rmode->xfbHeight - 16,
              rmode->fbWidth * VI_DISPLAY_PIX_SZ);
     CON_EnableGecko(1, 0);
+    // Enable auto new line mode
+    printf("\e[20h");
 
     clear_screen();
-
-    WPAD_Init();
 
     u16 menu_ver = get_tmd_version(0x0000000100000002);
 
@@ -705,18 +834,41 @@ main()
 
     SYS_SetPowerCallback(power_button_callback);
 
+    PAD_Init();
+
+    WPAD_Init();
+    WPAD_SetIdleTimeout(120);
+
     bool running = true;
     unsigned frames = 0;
     while (running) {
 
-        if ((frames % 60) == 0)
-            for (int i = WPAD_CHAN_0; i < WPAD_MAX_DEVICES; ++i)
-                WPAD_PadStatus(i);
+        if ((frames % 20) == 0)
+            for (int i = WPAD_CHAN_0; i <= WPAD_CHAN_3; ++i) {
+                u32 ext;
+                if (!WPAD_Probe(i, &ext)) {
+                    switch (ext) {
+                        case WPAD_EXP_NONE:
+                        case WPAD_EXP_NUNCHUK:
+                        case WPAD_EXP_CLASSIC:
+                        case WPAD_EXP_GUITARHERO3:
+                            WPAD_PadStatus(i);
+                            break;
+                        case WPAD_EXP_WIIBOARD:
+                            // Battery level is in the data report already
+                        default:
+                            // Wii U Pro also has battery in data report, as bar levels.
+                            ;
+                    }
+                }
+            }
 
+        PAD_ScanPads();
         WPAD_ScanPads();
 
-        for (int i = WPAD_CHAN_0; i < WPAD_MAX_DEVICES; ++i)
-            show_battery(i);
+        if ((frames % 20) == 0)
+            for (int i = WPAD_CHAN_0; i <= WPAD_CHAN_3; ++i)
+                show_wiimote(i);
 
         if (SYS_ResetButtonDown()) {
             printf_xy(24, 24, "RESET button pressed, exiting...");
@@ -740,9 +892,18 @@ main()
 
             u32 held = WPAD_ButtonsHeld(i);
             if (held & WPAD_BUTTON_A) {
+                // printf("A on %d\n", i);
                 WPAD_Rumble(i, 1);
             } else {
                 WPAD_Rumble(i, 0);
+            }
+        }
+
+        for (int i = PAD_CHAN0; i <= PAD_CHAN3; ++i) {
+            u16 pressed = PAD_ButtonsDown(i);
+            if (pressed & PAD_BUTTON_START) {
+                printf_xy(24, 24, "START button pressed, exiting...");
+                running = false;
             }
         }
 
@@ -751,4 +912,6 @@ main()
 
         ++frames;
     }
+
+    WPAD_Shutdown();
 }
