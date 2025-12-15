@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string>
 #include <string_view>
@@ -20,6 +19,7 @@
 
 #include <png.h>
 
+#include "ansi.hpp"
 #include "ios.h"
 
 #include "dolphin-image_png.h"
@@ -39,8 +39,9 @@
 void *xfb = NULL;
 GXRModeObj *rmode = NULL;
 
+using ansi::printf_xy;
 
-#define VER "1.3-dko"
+#define VER "dko"
 
 const std::array languages = {
     "Japanese",
@@ -136,9 +137,24 @@ load_settings()
         auto pos = line.find('=');
         if (pos == std::string::npos)
             continue;
-        std::string key{line.substr(0, pos)};
-        std::string value{line.substr(pos + 1)};
-        settings[key] = std::move(value);
+        bool bad_line = false;
+        auto key = line.substr(0, pos);
+        for (auto c : key)
+            if (c & 0x80) { // key should only contain ASCII characters
+                bad_line = true;
+                break;
+            }
+        if (bad_line)
+            continue;
+        auto value{line.substr(pos + 1)};
+        for (auto c : value)
+            if (c & 0x80) { // value should only contain ASCII characters
+                bad_line = true;
+                break;
+            }
+        if (bad_line)
+            continue;
+        settings[std::string{key}] = std::string{value};
     }
 }
 
@@ -524,17 +540,33 @@ bars_to_string(unsigned b)
 {
     switch (b) {
         case 0:
-            return "[----}";
+            return "[    }";
         case 1:
-            return "[#---}";
+            return "[#   }";
         case 2:
-            return "[##--}";
+            return "[##  }";
         case 3:
-            return "[###-}";
+            return "[### }";
         case 4:
             return "[####}";
         default:
             return "error";
+    }
+}
+
+void
+print_battery(unsigned bars, bool crit)
+{
+    if (crit) {
+        ansi::set_fg(ansi::color::light_red);
+        ansi::blink_fast();
+    }
+    ansi::set_bg(ansi::color::gray);
+    fputs(bars_to_string(bars), stdout);
+    ansi::set_bg(ansi::color::reset);
+    if (crit) {
+        ansi::blink_off();
+        ansi::set_fg(ansi::color::reset);
     }
 }
 
@@ -583,42 +615,6 @@ void power_button_callback()
     power_button_pressed = true;
 }
 
-int
-set_cursor(int x, int y)
-{
-    return printf("\e[%d;%dH", y, x);
-}
-
-int
-clear_line_forward()
-{
-    return printf("\e[0K");
-}
-
-int
-clear_screen()
-{
-    return printf("\e[2J");
-}
-
-__attribute__(( __format__(__printf__, 3, 4) ))
-int printf_xy(int x,
-              int y,
-              const char* fmt,
-              ...)
-{
-    int r1 = set_cursor(x, y);
-    if (r1 < 0)
-        return r1;
-    va_list args;
-    va_start(args, fmt);
-    int r2 = vprintf(fmt, args);
-    va_end(args);
-    if (r2 < 0)
-        return r2;
-    return r1 + r2;
-}
-
 void
 show_wiimote(int channel)
 {
@@ -627,8 +623,8 @@ show_wiimote(int channel)
 
     const int cur_x = 48;
     const int cur_y = 19 + channel;
-    set_cursor(cur_x, cur_y);
-    clear_line_forward();
+    ansi::set_pos(cur_x, cur_y);
+    ansi::clear_line_forward();
 
     u32 ext;
     if (WPAD_Probe(channel, &ext))
@@ -649,33 +645,34 @@ show_wiimote(int channel)
     };
 
     u8 bat = WPAD_BatteryLevel(channel);
+    bool crit = WPAD_IsBatteryCritical(channel);
 
     auto name = static_cast<unsigned>(channel) < names.size() ? names[channel] : "Unknown";
     if (ext == WPAD_EXP_WIIBOARD) {
         auto data = WPAD_Data(channel);
         bat = data->exp.wb.rbat;
-        printf("Bal. Board : %s (%2.0f%% %1.1fV, %u)",
-               bars_to_string(get_battery_bars_board(bat)),
+        printf("Bal. Board : ");
+        print_battery(get_battery_bars_board(bat), crit);
+        printf(" (%2.0f%% %1.1fV, %u)",
                get_battery_percent_board(bat),
                get_battery_volts_board(bat),
                unsigned{bat});
-        set_cursor(cur_x, cur_y + 1);
-        clear_line_forward();
+        ansi::set_pos(cur_x, cur_y + 1);
+        ansi::clear_line_forward();
         printf("weight: %.1f, temp: %u",
                data->exp.wb.weight,
                unsigned{data->exp.wb.rtemp});
     } else if (ext == WPAD_EXP_NONE) {
-        printf("%s : %s (%2.0f%% %1.1fV)",
-               name,
-               bars_to_string(get_battery_bars(bat)),
+        printf("%s : ", name);
+        print_battery(get_battery_bars(bat), crit);
+        printf(" (%2.0f%% %1.1fV)",
                get_battery_percent(bat),
                get_battery_volts(bat));
     } else {
         auto ename = ext < ext_names.size() ? ext_names[ext] : "?";
-        printf("%s (+%s) : %s (%2.0f%% %1.1fV)",
-               name,
-               ename,
-               bars_to_string(get_battery_bars(bat)),
+        printf("%s (+%s) : ", name, ename);
+        print_battery(get_battery_bars(bat), crit);
+        printf(" (%2.0f%% %1.1fV)",
                get_battery_percent(bat),
                get_battery_volts(bat));
     }
@@ -726,10 +723,10 @@ main()
              rmode->xfbHeight - 16,
              rmode->fbWidth * VI_DISPLAY_PIX_SZ);
     CON_EnableGecko(1, 0);
-    // Enable auto new line mode
-    printf("\e[20h");
 
-    clear_screen();
+    ansi::enable_auto_newline();
+
+    ansi::clear_screen();
 
     u16 menu_ver = get_tmd_version(0x0000000100000002);
 
