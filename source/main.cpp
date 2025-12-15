@@ -552,14 +552,14 @@ get_battery_percent(u8 raw)
 {
     // Use a piecewise linar approximation.
     if (raw >= 0x55)
-        return remap(raw, 0x55, 0x7c, 80, 100);
+        return remap(raw, 0x55, 0x7c, 75, 100);
     if (raw >= 0x44)
-        return remap(raw, 0x44, 0x55, 60, 80);
+        return remap(raw, 0x44, 0x55, 50, 75);
     if (raw >= 0x33)
-        return remap(raw, 0x33, 0x44, 40, 60);
+        return remap(raw, 0x33, 0x44, 25, 50);
     if (raw >= 0x03)
-        return remap(raw, 0x03, 0x33, 20, 40);
-    return remap(raw, 0x00, 0x03, 0, 20);
+        return remap(raw, 0x03, 0x33, 0, 25);
+    return 0;
 }
 
 float
