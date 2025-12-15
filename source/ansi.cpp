@@ -6,50 +6,108 @@
 
 namespace ansi {
 
+    int width = 80;
+    int height = 25;
+
+
     void
     enable_auto_newline()
     {
         std::fputs("\e[20h", stdout);
     }
 
-    int
+    void
     set_pos(int x,
             int y)
     {
-        return std::printf("\e[%d;%dH", y, x);
+        std::printf("\e[%d;%dH", y, x);
+    }
+
+
+    void
+    set_col(int x)
+    {
+        std::printf("\e[%dG", x);
+    }
+
+
+    void
+    hide_cursor()
+    {
+        std::fputs("\e[?25l", stdout);
+    }
+
+
+    void
+    show_cursor()
+    {
+        std::fputs("\e[?25h", stdout);
+    }
+
+
+    void
+    erase_line_forward()
+    {
+        std::fputs("\e[0K", stdout);
+    }
+
+
+    void
+    clear_screen(int mode)
+    {
+        std::printf("\e[%dJ", mode);
     }
 
 
     int
-    clear_line_forward()
+    printf_xy(int x,
+              int y,
+              const char* fmt,
+              ...)
     {
-        return std::fputs("\e[0K", stdout);
-    }
-
-
-    int
-    clear_screen()
-    {
-        return std::fputs("\e[2J", stdout);
-    }
-
-
-    __attribute__(( __format__(__printf__, 3, 4) ))
-    int printf_xy(int x,
-                  int y,
-                  const char* fmt,
-                  ...)
-    {
-        int r1 = set_pos(x, y);
-        if (r1 < 0)
-            return r1;
+        set_pos(x, y);
         va_list args;
         va_start(args, fmt);
-        int r2 = std::vprintf(fmt, args);
+        int r = std::vprintf(fmt, args);
         va_end(args);
-        if (r2 < 0)
-            return r2;
-        return r1 + r2;
+        return r;
+    }
+
+
+    void
+    centered(const char* fmt,
+             ...)
+    {
+        va_list args;
+        va_start(args, fmt);
+        int w = std::vsnprintf(nullptr, 0, fmt, args);
+        va_end(args);
+        if (w <= 0)
+            return;
+        int pos_x = (width - w) / 2;
+        set_col(pos_x);
+        va_start(args, fmt);
+        std::vprintf(fmt, args);
+        va_end(args);
+    }
+
+
+    void
+    centered(int y,
+             const char* fmt,
+             ...)
+    {
+        va_list args;
+        va_start(args, fmt);
+        int w = std::vsnprintf(nullptr, 0, fmt, args);
+        va_end(args);
+        if (w <= 0)
+            return;
+        int pos_x = (width - w) / 2;
+        set_pos(pos_x, y);
+        va_start(args, fmt);
+        std::vprintf(fmt, args);
+        va_end(args);
     }
 
 
@@ -87,6 +145,23 @@ namespace ansi {
         if (c >= color::light_black)
             base = 92; // light colors start from 100
         std::printf("\e[%dm", base + val);
+    }
+
+
+    void
+    set_fg(uint8_t r,
+           uint8_t g,
+           uint8_t b)
+    {
+        std::printf("\e[38;2;%u;%u;%um", r, g, b);
+    }
+
+    void
+    set_bg(uint8_t r,
+           uint8_t g,
+           uint8_t b)
+    {
+        std::printf("\e[48;2;%u;%u;%um", r, g, b);
     }
 
     void

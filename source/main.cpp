@@ -370,38 +370,6 @@ get_wifi_mac()
     return result;
 }
 
-u32 RGB2YCBCR(u8 r1, u8 g1, u8 b1) {
-    u8 r2 = r1; u8 g2 = g1; u8 b2 = b1;
-    if (r1 < 16) r1 = 16;
-    if (g1 < 16) g1 = 16;
-    if (b1 < 16) b1 = 16;
-    if (r2 < 16) r2 = 16;
-    if (g2 < 16) g2 = 16;
-    if (b2 < 16) b2 = 16;
-
-    if (r1 > 240) r1 = 240;
-    if (g1 > 240) g1 = 240;
-    if (b1 > 240) b1 = 240;
-    if (r2 > 240) r2 = 240;
-    if (g2 > 240) g2 = 240;
-    if (b2 > 240) b2 = 240;
-
-    u8 Y1 = ( 77 * r1 + 150 * g1 + 29 * b1) / 256;
-    u8 Y2 = ( 77 * r2 + 150 * g2 + 29 * b2) / 256;
-    u8 Cb = (112 * (b1 + b2) -  74 * (g1 + g2) - 38 * (r1 + r2)) / 512 + 128;
-    u8 Cr = (112 * (r1 + r2) - 94 * (g1 + g2) - 18 * (b1 + b2)) / 512 + 128;
-
-    return Y1 << 24 | Cb << 16 | Y2 << 8 | Cr;
-}
-
-void writetoxfb(void* videoBuffer, u32 offset, u32 length, u32 color)
-{
-    u32 *pixels = ((u32*)videoBuffer) + offset;
-    for (u32 i = 0; i < length; i++) {
-        *pixels++ = color;
-    }
-}
-
 void
 convert_row(const u8* src_rgb,
             unsigned src_width,
@@ -624,7 +592,7 @@ show_wiimote(int channel)
     const int cur_x = 48;
     const int cur_y = 19 + channel;
     ansi::set_pos(cur_x, cur_y);
-    ansi::clear_line_forward();
+    ansi::erase_line_forward();
 
     u32 ext;
     if (WPAD_Probe(channel, &ext))
@@ -658,7 +626,7 @@ show_wiimote(int channel)
                get_battery_volts_board(bat),
                unsigned{bat});
         ansi::set_pos(cur_x, cur_y + 1);
-        ansi::clear_line_forward();
+        ansi::erase_line_forward();
         printf("weight: %.1f, temp: %u",
                data->exp.wb.weight,
                unsigned{data->exp.wb.rtemp});
@@ -676,6 +644,76 @@ show_wiimote(int channel)
                get_battery_percent(bat),
                get_battery_volts(bat));
     }
+}
+
+void
+show_colors()
+{
+    int pos_x = 8;
+    int pos_y = 25;
+
+    // Regular palette.
+    ansi::set_pos(pos_x, pos_y + 0);
+    using ansi::color;
+    for (auto c = color::black; c < color::light_black; c = color{static_cast<int>(c) + 1}) {
+        ansi::set_bg(c);
+        fputs("  ", stdout);
+    }
+
+    // Light palette.
+    ansi::set_pos(pos_x, pos_y + 1);
+    for (auto c = color::light_black; c < color::num_colors; c = color{static_cast<int>(c) + 1}) {
+        ansi::set_bg(c);
+        fputs("  ", stdout);
+    }
+
+    pos_x = 26;
+
+    // Gray scale bar.
+    ansi::set_pos(pos_x, pos_y + 0);
+    ansi::set_bg(color::reset);
+    fputs("[", stdout);
+    for (int i = 0; i < 52; ++i) {
+        ansi::set_bg(i * 5, i * 5, i * 5);
+        fputs(" ", stdout);
+    }
+    ansi::set_bg(color::reset);
+    fputs("]", stdout);
+
+    // Red bar.
+    ansi::set_pos(pos_x, pos_y + 1);
+    ansi::set_bg(color::reset);
+    fputs("[", stdout);
+    for (int i = 0; i < 52; ++i) {
+        ansi::set_bg(i * 5, 0, 0);
+        fputs(" ", stdout);
+    }
+    ansi::set_bg(color::reset);
+    fputs("]", stdout);
+
+    // Green bar.
+    ansi::set_pos(pos_x, pos_y + 2);
+    ansi::set_bg(color::reset);
+    fputs("[", stdout);
+    for (int i = 0; i < 52; ++i) {
+        ansi::set_bg(0, i * 5, 0);
+        fputs(" ", stdout);
+    }
+    ansi::set_bg(color::reset);
+    fputs("]", stdout);
+
+    // Blue bar.
+    ansi::set_pos(pos_x, pos_y + 3);
+    ansi::set_bg(color::reset);
+    fputs("[", stdout);
+    for (int i = 0; i < 52; ++i) {
+        ansi::set_bg(0, 0, i * 5);
+        fputs(" ", stdout);
+    }
+    ansi::set_bg(color::reset);
+    fputs("]", stdout);
+
+    ansi::set_bg(color::reset);
 }
 
 //---------------------------------------------------------------------------------
@@ -716,17 +754,25 @@ main()
     if (rmode->viTVMode & VI_NON_INTERLACE)
         VIDEO_WaitVSync();
 
-    // Initialise the console, required for printf
+    // Initialise the console, 80x30
+    int con_pad_x = 0;
+    int con_pad_y = 0;
     CON_Init(xfb,
-             8, 8,
-             rmode->fbWidth - 16,
-             rmode->xfbHeight - 16,
+             con_pad_x,
+             con_pad_y,
+             rmode->fbWidth - 2 * con_pad_x,
+             rmode->xfbHeight - 2 * con_pad_y,
              rmode->fbWidth * VI_DISPLAY_PIX_SZ);
     CON_EnableGecko(1, 0);
 
+    int con_w, con_h;
+    CON_GetMetrics(&con_w, &con_h);
+    ansi::width = con_w;
+    ansi::height = con_h;
+    ansi::reset();
     ansi::enable_auto_newline();
-
-    ansi::clear_screen();
+    ansi::hide_cursor();
+    ansi::clear_screen(3);
 
     u16 menu_ver = get_tmd_version(0x0000000100000002);
 
@@ -766,13 +812,13 @@ main()
 
     // Start printing.
 
-    printf_xy(31, 3, "NiioFetch %s", VER);
+    ansi::centered(3, "NiioFetch %s", VER);
 
     show_image(console_type);
 
     const int cur_x = 48;
 
-    printf_xy(cur_x, 5, "Running on IOS : %d", IOS_GetVersion());
+    printf_xy(cur_x, 5, "Using IOS : %d", IOS_GetVersion());
     switch (console_type) {
         case ConsoleType::Wii:
         case ConsoleType::WiiFamily:
@@ -808,26 +854,7 @@ main()
 
     printf_xy(cur_x, 18, "Titles installed : %d", num_titles);
 
-    for (int i = 400; i < 416; i++) {
-        writetoxfb(xfb, 160 + i*320, 12, COLOR_BLACK);
-        writetoxfb(xfb, 160 + 12 + i*320, 12,  RGB2YCBCR(192, 0, 0));
-        writetoxfb(xfb, 160 + 24 + i*320, 12,  RGB2YCBCR(0, 200, 0));
-        writetoxfb(xfb, 160 + 36 + i*320, 12,  RGB2YCBCR(200, 200, 16));
-        writetoxfb(xfb, 160 + 48 + i*320, 12,  RGB2YCBCR(16, 32, 192));
-        writetoxfb(xfb, 160 + 60 + i*320, 12,  RGB2YCBCR(160, 16, 240));
-        writetoxfb(xfb, 160 + 72 + i*320, 12,  RGB2YCBCR(16, 200, 200));
-        writetoxfb(xfb, 160 + 84 + i*320, 12,  RGB2YCBCR(190, 190, 190));
-    }
-    for (int i = 416; i < 432; i++) {
-        writetoxfb(xfb, 160 + i*320, 12, RGB2YCBCR(64, 64, 64));
-        writetoxfb(xfb, 160 + 12 + i*320, 12,  RGB2YCBCR(255, 0, 0));
-        writetoxfb(xfb, 160 + 24 + i*320, 12,  RGB2YCBCR(0, 255, 0));
-        writetoxfb(xfb, 160 + 36 + i*320, 12,  RGB2YCBCR(255, 255, 64));
-        writetoxfb(xfb, 160 + 48 + i*320, 12,  RGB2YCBCR(16, 64, 255));
-        writetoxfb(xfb, 160 + 60 + i*320, 12,  RGB2YCBCR(180, 52, 240));
-        writetoxfb(xfb, 160 + 72 + i*320, 12,  RGB2YCBCR(64, 240, 240));
-        writetoxfb(xfb, 160 + 84 + i*320, 12,  COLOR_WHITE);
-    }
+    show_colors();
 
     SYS_SetPowerCallback(power_button_callback);
 
@@ -868,12 +895,12 @@ main()
                 show_wiimote(i);
 
         if (SYS_ResetButtonDown()) {
-            printf_xy(24, 24, "RESET button pressed, exiting...");
+            ansi::centered(24, "RESET button pressed, exiting...");
             running = false;
         }
 
         if (power_button_pressed) {
-            printf_xy(24, 24, "POWER button pressed, exiting...");
+            ansi::centered(24, "POWER button pressed, exiting...");
             running = false;
         }
 
@@ -883,13 +910,12 @@ main()
 
             u32 pressed = WPAD_ButtonsDown(i);
             if (pressed & WPAD_BUTTON_HOME) {
-                printf_xy(24, 24, "HOME button pressed, exiting...");
+                ansi::centered(24, "HOME button pressed, exiting...");
                 running = false;
             }
 
             u32 held = WPAD_ButtonsHeld(i);
             if (held & WPAD_BUTTON_A) {
-                // printf("A on %d\n", i);
                 WPAD_Rumble(i, 1);
             } else {
                 WPAD_Rumble(i, 0);
@@ -899,7 +925,7 @@ main()
         for (int i = PAD_CHAN0; i <= PAD_CHAN3; ++i) {
             u16 pressed = PAD_ButtonsDown(i);
             if (pressed & PAD_BUTTON_START) {
-                printf_xy(24, 24, "START button pressed, exiting...");
+                ansi::centered(24, "START button pressed, exiting...");
                 running = false;
             }
         }
@@ -909,6 +935,15 @@ main()
 
         ++frames;
     }
+
+    ansi::reset();
+
+    // Note: libogc's console isn't ignoring the show_cursor code.
+    ansi::set_fg(ansi::color::black);
+    ansi::show_cursor();
+
+    ansi::reset();
+    ansi::set_pos(1, 1);
 
     WPAD_Shutdown();
 }

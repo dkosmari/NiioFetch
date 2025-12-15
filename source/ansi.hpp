@@ -1,25 +1,51 @@
 #pragma once
 
+#include <stdint.h>
+
 namespace ansi {
+
+    extern int width;
+    extern int height;
 
     void
     enable_auto_newline();
 
-    int
+    void
+    hide_cursor();
+
+    void
+    show_cursor();
+
+    void
     set_pos(int x,
             int y);
 
-    int
-    clear_line_forward();
+    void
+    set_col(int x);
 
-    int
-    clear_screen();
+    void
+    erase_line_forward();
+
+    void
+    clear_screen(int mode = 2);
 
     __attribute__(( __format__(__printf__, 3, 4) ))
-    int printf_xy(int x,
-                  int y,
-                  const char* fmt,
-                  ...);
+    int
+    printf_xy(int x,
+              int y,
+              const char* fmt,
+              ...);
+
+    __attribute__(( __format__(__printf__, 1, 2) ))
+    void
+    centered(const char* fmt,
+             ...);
+
+    __attribute__(( __format__(__printf__, 2, 3) ))
+    void
+    centered(int y,
+             const char* fmt,
+             ...);
 
     void
     reset();
@@ -43,6 +69,7 @@ namespace ansi {
         light_magenta = 13,
         light_cyan = 14,
         light_white = 15,
+        num_colors = 16,
     };
 
     void
@@ -50,6 +77,16 @@ namespace ansi {
 
     void
     set_bg(color c);
+
+    void
+    set_fg(uint8_t r,
+           uint8_t g,
+           uint8_t b);
+
+    void
+    set_bg(uint8_t r,
+           uint8_t g,
+           uint8_t b);
 
     void
     blink_slow();
