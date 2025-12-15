@@ -490,6 +490,7 @@ get_battery_bars(u8 raw)
     return 0; // (0, 2.164]
 }
 
+#if 0
 unsigned
 get_battery_bars_board(u8 raw)
 {
@@ -503,6 +504,7 @@ get_battery_bars_board(u8 raw)
         return 1;
     return 0;
 }
+#endif
 
 const char*
 bars_to_string(unsigned b)
@@ -584,14 +586,113 @@ void power_button_callback()
     power_button_pressed = true;
 }
 
+const char*
+get_wiimote_name(int channel)
+{
+    switch (channel) {
+        case WPAD_CHAN_0:
+            return "WM 1";
+        case WPAD_CHAN_1:
+            return "WM 2";
+        case WPAD_CHAN_2:
+            return "WM 3";
+        case WPAD_CHAN_3:
+            return "WM 4";
+        default:
+            return "WM ?";
+    }
+}
+
+const char*
+get_extension_name(int ext)
+{
+    switch (ext) {
+        case EXP_NONE:
+            return "none";
+        case EXP_NUNCHUK:
+            return "nun.";
+        case EXP_CLASSIC:
+            return "class.";
+        case EXP_GUITAR_HERO_3:
+            return "guitar";
+        case EXP_WII_BOARD:
+            return "bboard";
+        case EXP_MOTION_PLUS:
+            return "mplus";
+        default:
+            return "???";
+    }
+}
+
 void
-show_wiimote(int channel)
+show_wiimote_common(int channel)
+{
+    u8 bat = WPAD_BatteryLevel(channel);
+    bool crit = WPAD_IsBatteryCritical(channel);
+    print_battery(get_battery_bars(bat), crit);
+    printf(" %2.0f%% %1.1fV",
+           get_battery_percent(bat),
+           get_battery_volts(bat));
+}
+
+void
+show_wiimote_core(int channel)
+{
+    printf("%s : ", get_wiimote_name(channel));
+    show_wiimote_common(channel);
+}
+
+void
+show_wiimote_ext(int channel,
+                 int ext)
+{
+    printf("%s + %s : ",
+           get_wiimote_name(channel),
+           get_extension_name(ext));
+    show_wiimote_common(channel);
+}
+
+void
+show_balance_board(int cur_x,
+                   int cur_y,
+                   int channel)
+{
+    auto data = WPAD_Data(channel);
+    const auto& wb = data->exp.wb;
+    u8 bat = wb.rbat;
+    bool crit = WPAD_IsBatteryCritical(channel);
+    if (wb.battery == 0)
+        crit = true;
+    printf("Bal. Board : ");
+    print_battery(wb.battery, crit);
+    printf(" %2.0f%% %1.1fV",
+           get_battery_percent_board(bat),
+           get_battery_volts_board(bat));
+    ansi::set_pos(cur_x, cur_y + 1);
+    ansi::erase_line_forward();
+    printf("weight: %.1f, temp: %u",
+           wb.weight,
+           unsigned{wb.rtemp});
+}
+
+void
+show_wiiu_pro(int channel)
+{
+    printf("Pro %d : ", channel + 1);
+    auto data = WPAD_Data(channel);
+    auto bars = data->exp.classic.battery;
+    bool crit = bars == 0;
+    print_battery(bars, crit);
+}
+
+void
+show_wiimote(int cur_x,
+             int cur_y,
+             int channel)
 {
     if (channel < 0)
         return;
 
-    const int cur_x = 48;
-    const int cur_y = 19 + channel;
     ansi::set_pos(cur_x, cur_y);
     ansi::erase_line_forward();
 
@@ -599,50 +700,23 @@ show_wiimote(int channel)
     if (WPAD_Probe(channel, &ext))
         return;
 
-    static const std::array names = {
-        "Wiimote 1",
-        "Wiimote 2",
-        "Wiimote 3",
-        "Wiimote 4",
-    };
-
-    static const std::array ext_names = {
-        "none",
-        "nunchuk",
-        "classic",
-        "guitar",
-    };
-
-    u8 bat = WPAD_BatteryLevel(channel);
-    bool crit = WPAD_IsBatteryCritical(channel);
-
-    auto name = static_cast<unsigned>(channel) < names.size() ? names[channel] : "Unknown";
-    if (ext == WPAD_EXP_WIIBOARD) {
-        auto data = WPAD_Data(channel);
-        bat = data->exp.wb.rbat;
-        printf("Bal. Board : ");
-        print_battery(get_battery_bars_board(bat), crit);
-        printf(" %2.0f%% %1.1fV",
-               get_battery_percent_board(bat),
-               get_battery_volts_board(bat));
-        ansi::set_pos(cur_x, cur_y + 1);
-        ansi::erase_line_forward();
-        printf("weight: %.1f, temp: %u",
-               data->exp.wb.weight,
-               unsigned{data->exp.wb.rtemp});
-    } else if (ext == WPAD_EXP_NONE) {
-        printf("%s : ", name);
-        print_battery(get_battery_bars(bat), crit);
-        printf(" %2.0f%% %1.1fV",
-               get_battery_percent(bat),
-               get_battery_volts(bat));
-    } else {
-        auto ename = ext < ext_names.size() ? ext_names[ext] : "?";
-        printf("%s (+%s) : ", name, ename);
-        print_battery(get_battery_bars(bat), crit);
-        printf(" %2.0f%% %1.1fV",
-               get_battery_percent(bat),
-               get_battery_volts(bat));
+    switch (ext) {
+        case WPAD_EXP_NONE:
+            show_wiimote_core(channel);
+            break;
+        case WPAD_EXP_WIIBOARD:
+            show_balance_board(cur_x, cur_y, channel);
+            break;
+        case EXP_CLASSIC: {
+            auto data = WPAD_Data(channel);
+            if (data->exp.classic.type == CLASSIC_TYPE_WIIU)
+                show_wiiu_pro(channel);
+            else
+                show_wiimote_ext(channel, ext);
+            break;
+        }
+        default:
+            show_wiimote_ext(channel, ext);
     }
 }
 
@@ -893,7 +967,7 @@ main()
 
         if ((frames % 20) == 0)
             for (int i = WPAD_CHAN_0; i <= WPAD_CHAN_3; ++i)
-                show_wiimote(i);
+                show_wiimote(cur_x, 19 + i, i);
 
         if (SYS_ResetButtonDown()) {
             ansi::centered(24, "RESET button pressed, exiting...");
@@ -905,7 +979,7 @@ main()
             running = false;
         }
 
-        for (int i = WPAD_CHAN_0; i < WPAD_MAX_DEVICES; ++i) {
+        for (int i = WPAD_CHAN_0; i <= WPAD_CHAN_3; ++i) {
             if (WPAD_Probe(i, nullptr))
                 continue;
 
@@ -917,6 +991,7 @@ main()
 
             u32 held = WPAD_ButtonsHeld(i);
             if (held & WPAD_BUTTON_A) {
+                // printf("pressed A\n");
                 WPAD_Rumble(i, 1);
             } else {
                 WPAD_Rumble(i, 0);
