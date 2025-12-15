@@ -471,8 +471,9 @@ get_battery_volts(u8 raw)
 float
 get_battery_volts_board(u8 raw)
 {
-    // TODO
-    return 0 * raw;
+    float m = 0.04064257f;
+    float b = -0.076462994f;
+    return m * raw + b;
 }
 
 unsigned
@@ -543,7 +544,7 @@ remap(float x,
       float src_min, float src_max,
       float dst_min, float dst_max)
 {
-    return (x - src_min) * (dst_max - dst_min) / (src_max - src_min);
+    return dst_min + (x - src_min) * (dst_max - dst_min) / (src_max - src_min);
 }
 
 float
@@ -568,7 +569,7 @@ get_battery_percent_board(u8 raw)
     if (raw >= 0x82)
         return remap(raw, 0x82, 0x86, 75, 100);
     if (raw >= 0x7d)
-        return remap(raw, 0x7d, 0x72, 50, 75);
+        return remap(raw, 0x7d, 0x82, 50, 75);
     if (raw >= 0x78)
         return remap(raw, 0x78, 0x7d, 25, 50);
     if (raw >= 0x6a)
@@ -621,10 +622,9 @@ show_wiimote(int channel)
         bat = data->exp.wb.rbat;
         printf("Bal. Board : ");
         print_battery(get_battery_bars_board(bat), crit);
-        printf(" (%2.0f%% %1.1fV, %u)",
+        printf(" %2.0f%% %1.1fV",
                get_battery_percent_board(bat),
-               get_battery_volts_board(bat),
-               unsigned{bat});
+               get_battery_volts_board(bat));
         ansi::set_pos(cur_x, cur_y + 1);
         ansi::erase_line_forward();
         printf("weight: %.1f, temp: %u",
@@ -633,14 +633,14 @@ show_wiimote(int channel)
     } else if (ext == WPAD_EXP_NONE) {
         printf("%s : ", name);
         print_battery(get_battery_bars(bat), crit);
-        printf(" (%2.0f%% %1.1fV)",
+        printf(" %2.0f%% %1.1fV",
                get_battery_percent(bat),
                get_battery_volts(bat));
     } else {
         auto ename = ext < ext_names.size() ? ext_names[ext] : "?";
         printf("%s (+%s) : ", name, ename);
         print_battery(get_battery_bars(bat), crit);
-        printf(" (%2.0f%% %1.1fV)",
+        printf(" %2.0f%% %1.1fV",
                get_battery_percent(bat),
                get_battery_volts(bat));
     }
@@ -772,6 +772,7 @@ main()
     ansi::reset();
     ansi::enable_auto_newline();
     ansi::hide_cursor();
+    ansi::clear_screen();
     ansi::clear_screen(3);
 
     u16 menu_ver = get_tmd_version(0x0000000100000002);
@@ -936,14 +937,18 @@ main()
         ++frames;
     }
 
-    ansi::reset();
-
-    // Note: libogc's console isn't ignoring the show_cursor code.
+    // Note: libogc's console isn't ignoring the show_cursor code, so we set the color
+    // to black, then revert it back to default.
     ansi::set_fg(ansi::color::black);
     ansi::show_cursor();
-
     ansi::reset();
+
     ansi::set_pos(1, 1);
+
+#if 0
+    ansi::clear_screen();
+    ansi::clear_screen(3);
+#endif
 
     WPAD_Shutdown();
 }
