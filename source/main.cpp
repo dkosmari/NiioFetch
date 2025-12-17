@@ -652,6 +652,8 @@ show_wiimote_ext(int channel,
     show_wiimote_common(channel);
 }
 
+float board_zero[WII_BOARD_NUM_SENSORS];
+
 void
 show_balance_board(int cur_x,
                    int cur_y,
@@ -659,7 +661,7 @@ show_balance_board(int cur_x,
 {
     auto data = WPAD_Data(channel);
     const auto& wb = data->exp.wb;
-    u8 bat = wb.rbat;
+    u8 bat = wb.raw_bat;
     bool crit = WPAD_IsBatteryCritical(channel);
     if (wb.battery == 0)
         crit = true;
@@ -670,9 +672,10 @@ show_balance_board(int cur_x,
            get_battery_volts_board(bat));
     ansi::set_pos(cur_x, cur_y + 1);
     ansi::erase_line_forward();
-    printf("weight: %.1f, temp: %u",
-           wb.weight,
-           unsigned{wb.rtemp});
+    float total_zero = board_zero[0] + board_zero[1] + board_zero[2] + board_zero[3];
+    printf("weight: %2.1f, temp: %u",
+           wb.total_weight - total_zero,
+           unsigned{wb.raw_temp});
 }
 
 void
@@ -943,15 +946,15 @@ main()
     while (running) {
 
         if ((frames % 20) == 0)
-            for (int i = WPAD_CHAN_0; i <= WPAD_CHAN_3; ++i) {
+            for (int chan = WPAD_CHAN_0; chan <= WPAD_CHAN_3; ++chan) {
                 u32 ext;
-                if (!WPAD_Probe(i, &ext)) {
+                if (!WPAD_Probe(chan, &ext)) {
                     switch (ext) {
                         case WPAD_EXP_NONE:
                         case WPAD_EXP_NUNCHUK:
                         case WPAD_EXP_CLASSIC:
                         case WPAD_EXP_GUITARHERO3:
-                            WPAD_PadStatus(i);
+                            WPAD_PadStatus(chan);
                             break;
                         case WPAD_EXP_WIIBOARD:
                             // Battery level is in the data report already
@@ -966,8 +969,8 @@ main()
         WPAD_ScanPads();
 
         if ((frames % 20) == 0)
-            for (int i = WPAD_CHAN_0; i <= WPAD_CHAN_3; ++i)
-                show_wiimote(cur_x, 19 + i, i);
+            for (int chan = WPAD_CHAN_0; chan <= WPAD_CHAN_3; ++chan)
+                show_wiimote(cur_x, 19 + chan, chan);
 
         if (SYS_ResetButtonDown()) {
             ansi::centered(24, "RESET button pressed, exiting...");
@@ -979,27 +982,34 @@ main()
             running = false;
         }
 
-        for (int i = WPAD_CHAN_0; i <= WPAD_CHAN_3; ++i) {
-            if (WPAD_Probe(i, nullptr))
+        for (int chan = WPAD_CHAN_0; chan <= WPAD_CHAN_3; ++chan) {
+            u32 ext;
+            if (WPAD_Probe(chan, &ext))
                 continue;
 
-            u32 pressed = WPAD_ButtonsDown(i);
+            u32 pressed = WPAD_ButtonsDown(chan);
             if (pressed & WPAD_BUTTON_HOME) {
                 ansi::centered(24, "HOME button pressed, exiting...");
                 running = false;
             }
 
-            u32 held = WPAD_ButtonsHeld(i);
+            if (pressed & WPAD_BUTTON_A && ext == EXP_WII_BOARD) {
+                auto data = WPAD_Data(chan);
+                for (unsigned i = 0; i < WII_BOARD_NUM_SENSORS; ++i)
+                    board_zero[i] = data->exp.wb.weight[i];
+            }
+
+            u32 held = WPAD_ButtonsHeld(chan);
             if (held & WPAD_BUTTON_A) {
                 // printf("pressed A\n");
-                WPAD_Rumble(i, 1);
+                WPAD_Rumble(chan, 1);
             } else {
-                WPAD_Rumble(i, 0);
+                WPAD_Rumble(chan, 0);
             }
         }
 
-        for (int i = PAD_CHAN0; i <= PAD_CHAN3; ++i) {
-            u16 pressed = PAD_ButtonsDown(i);
+        for (int port = PAD_CHAN0; port <= PAD_CHAN3; ++port) {
+            u16 pressed = PAD_ButtonsDown(port);
             if (pressed & PAD_BUTTON_START) {
                 ansi::centered(24, "START button pressed, exiting...");
                 running = false;
